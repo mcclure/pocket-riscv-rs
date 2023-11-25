@@ -108,6 +108,7 @@ fn main() -> ! {
     println!("-- Strobe --");
 
     // Framebuffer pointer
+    // TODO: Either assert heap and framebuffer are not overlapping, or set VIDEO_FRAMEBUFFER manually
     let fb:*mut u16 = peripherals.VIDEO_FRAMEBUFFER.dma_base.read().bits() as *mut u16;
 
     render_init(fb);
@@ -121,14 +122,18 @@ fn main() -> ! {
         let mut paused = false;
         let mut cont1_key_last = 0;
 
-        loop {
-            let mut buffer_fill = peripherals.APF_AUDIO.buffer_fill.read().bits();
+        #[cfg(feature = "speed-debug")]
+        let mut missed_deadline = 0;
 
-            // Wait for frame
-            while buffer_fill > 400 {
-                // Busy wait until the buffer is half empty
-                buffer_fill = peripherals.APF_AUDIO.buffer_fill.read().bits();
-            }
+        // Remember: Vsync occurs slightly after vblank, so vblank tells us when it's safe to draw
+        // and vsync tells us when we missed a frame. For this test app, we'll begin by waiting for
+        // one complete frame to pass us by, suboptimal in a real app but okay here:
+        while 0 == peripherals.APF_VIDEO.vsync_status.read().bits() {}
+        while 0 != peripherals.APF_VIDEO.vblank_status.read().bits() {}
+
+        loop {
+            // Wait for post-frame blank
+            while 0 == peripherals.APF_VIDEO.vblank_status.read().bits() {}
 
             // Controls
             let cont1_key = peripherals.APF_INPUT.cont1_key.read().bits() as u16; // Crop out analog sticks
@@ -173,7 +178,15 @@ fn main() -> ! {
                 }
             }
 
+            #[cfg(feature = "speed-debug")]
+            if 0 == peripherals.APF_VIDEO.vblank_status.read().bits() {
+                missed_deadline += 1;
+                println!("Too slow! Drawing exceeded vblank deadline #{}", missed_deadline);
+            }
+
             // Audio gen
+            // TODO: query peripherals.APF_AUDIO.buffer_fill.read().bits() and either overproduce or underproduce slightly
+            //       to ensure we always have a safety margin in the buffer and don't stutter on a frame miss.
             for _ in 0..800 { // 800 samples = 1/60 of a second. This will pause us long enough for a frame to pass
                 let value:u32 = wave as u32;
                 let value = value >> 4;
