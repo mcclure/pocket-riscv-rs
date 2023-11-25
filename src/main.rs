@@ -135,7 +135,7 @@ fn main() -> ! {
         let mut bleep_high = false;
         let mut bleeping = 0;
         let mut blooping = 0;
-        let mut final_vader_facing = 1;
+        let mut final_vader_facing = 0;
 
         // Geometry support: 0,0 is top left
         #[allow(dead_code)] // To remove if code changes
@@ -325,6 +325,10 @@ fn main() -> ! {
                 if vaders.len() == 1 {
                     let vader = &mut vaders[0];
                     fill(fb, vader.rect, VADER_COLOR);
+                    if final_vader_facing == 0 {
+                        final_vader_facing = if vader.rect.center().x > DISPLAY_WIDTH as i32/2
+                            { -1 } else { 1 }
+                    }
                     let vader_move = IVec2::new(final_vader_facing, 0);
                     let rect = vader.rect.offset(vader_move);
                     vader.rect = if screen.enclose(rect) { rect } else {
