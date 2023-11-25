@@ -148,20 +148,6 @@ fn main() -> ! {
                 else { 0 };
             let flickering = (cont1_key & FaceY as u16 != 0) || 0 != frame_counter & flicker_freq;
 
-            // Audio gen
-            for _ in 0..800 { // 800 samples = 1/60 of a second. This will pause us long enough for a frame to pass
-                let value:u32 = wave as u32;
-                let value = value >> 4;
-                let value = value | (value << 16);
-
-                if (!paused) {
-                    let freq_delta = if flickering { FREQ_DELTA * 4 } else { FREQ_DELTA };
-                    wave = wave.wrapping_add(freq_delta);
-                }
-
-                unsafe { peripherals.APF_AUDIO.out.write(|w| w.bits(value)) };
-            }
-
             unsafe { peripherals.APF_AUDIO.playback_en.write(|w| w.bits(1)) };
 
             // Video gen
@@ -185,6 +171,20 @@ fn main() -> ! {
                 for x in 0..DISPLAY_WIDTH {
                      *pixel(fb, x, y) = color_gray;
                 }
+            }
+
+            // Audio gen
+            for _ in 0..800 { // 800 samples = 1/60 of a second. This will pause us long enough for a frame to pass
+                let value:u32 = wave as u32;
+                let value = value >> 4;
+                let value = value | (value << 16);
+
+                if (!paused) {
+                    let freq_delta = if flickering { FREQ_DELTA * 4 } else { FREQ_DELTA };
+                    wave = wave.wrapping_add(freq_delta);
+                }
+
+                unsafe { peripherals.APF_AUDIO.out.write(|w| w.bits(value)) };
             }
 
             // Progress
