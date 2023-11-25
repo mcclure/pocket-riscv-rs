@@ -1,6 +1,6 @@
 This is a repo meant to host Rust programs for agg23's [Pocket RISC-V](https://github.com/agg23/openfpga-litex) platform. While Rust *can* be built out of the openfpga-litex repo directly, this repo references openfpga-litex as a git submodule (in `external/openfpga-litex`) so that a single piece of Rust code can be easily tested with different versions of openfpga-litex.
 
-The code in this commit is a small brick breaking game ("minibreak") that shows off basic capabilities of the core: It has controls (left and right d-pad, select to pause), reads the system timer (for RNG), generates sound, and draws in the framebuffer.
+The code in this commit is a small screen-test app. It fills the screen with a pulsing color and occasional inverting flashes; pressing the Y button will cause it to invert while the button is held down, and pressing A, B or X will cause it to flash at various frequencies. **Warning**, this application can be very unpleasant to look at in any mode. The purpose of this is to demonstrate vsync; the app is not synchronized with the vertical blanking interval, so on some boots, the screen will exhibit vertical "tearing".
 
 If you wish to fork this, make sure to change the app name in Cargo.toml (it gets built into the application) and the license below (assuming do not wish to release as public domain). You may also prefer to remove the app-specific dependency "glam".
 
