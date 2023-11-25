@@ -150,7 +150,7 @@ fn main() -> ! {
     // Initialize the allocator BEFORE you use it
     unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) };
 
-    println!("-- Space out --");
+    println!("-- Minibreak --");
 
     let fb:*mut u16 = peripherals.VIDEO_FRAMEBUFFER.dma_base.read().bits() as *mut u16;
 
@@ -344,7 +344,13 @@ fn main() -> ! {
         assert_eq!(VADER_ORIGIN.x+VADER_PADDING.x >= 0, true, "Screen too narrow for vaders");
 
         players.push(Player { rect:IRect2::new_centered(PLAYER_START, PLAYER_SIZE), facing:0 });
-        balls.push(Ball { rect:IRect2::new_centered(ball1_start, BALL_SIZE), facing:BALL_FACING });
+
+        let ball_facing = { // Randomly start moving left or right; use the current UTC as a very weak RNG
+            let mut ball_facing = BALL_FACING;
+            if 0 == peripherals.APF_RTC.unix_seconds.read().bits() % 2 { ball_facing.x *= -1 }
+            ball_facing
+        };
+        balls.push(Ball { rect:IRect2::new_centered(ball1_start, BALL_SIZE), facing:ball_facing });
 
         for y in 0..VADER_ROWS {
             for x in 0..VADER_COLS {
