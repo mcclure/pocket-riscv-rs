@@ -117,6 +117,7 @@ fn main() -> ! {
     {
         let mut wave:u16 = 0;
         const FREQ_DELTA:u16 = 150; 
+        const AUDIO_TARGET:i32 = 48000/60 + 200; // Try to fill audio buffer to this point
         let mut frame_counter:u8 = 0;
 
         let mut paused = false;
@@ -184,10 +185,8 @@ fn main() -> ! {
                 println!("Too slow! Drawing exceeded vblank deadline #{}", missed_deadline);
             }
 
-            // Audio gen
-            // TODO: query peripherals.APF_AUDIO.buffer_fill.read().bits() and either overproduce or underproduce slightly
-            //       to ensure we always have a safety margin in the buffer and don't stutter on a frame miss.
-            for _ in 0..800 { // 800 samples = 1/60 of a second. This will pause us long enough for a frame to pass
+            let audio_needed = AUDIO_TARGET - peripherals.APF_AUDIO.buffer_fill.read().bits() as i32;
+            for _ in 0..audio_needed { // 800 samples = 1/60 of a second. This will pause us long enough for a frame to pass
                 let value:u32 = wave as u32;
                 let value = value >> 4;
                 let value = value | (value << 16);
