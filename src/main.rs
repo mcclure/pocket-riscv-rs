@@ -366,7 +366,7 @@ fn main() -> ! {
 
                 // Ball
                 for ball in &mut balls {
-                    if config_chaos < 2 {
+                    if config_chaos < 1 {
                         fill(fb, ball.rect, BALL_COLOR);
                     }
 
