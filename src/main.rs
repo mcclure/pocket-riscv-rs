@@ -2,21 +2,11 @@
 #![no_main]
 #![allow(unused_parens)]
 
-use alloc::format;
-use core::arch::asm;
-use core::borrow::BorrowMut;
-use core::cell::RefCell;
 use core::panic::PanicInfo;
-use core::slice::{from_raw_parts, from_raw_parts_mut};
-use core::sync::atomic::AtomicU32;
-use core::time::Duration;
-use core::cell::UnsafeCell;
-use embedded_hal::prelude::_embedded_hal_blocking_serial_Write;
-use num_traits::float::FloatCore;
+use core::slice::from_raw_parts_mut;
 
 extern crate alloc;
 
-use alloc::{boxed::Box, rc::Rc};
 use embedded_alloc::Heap;
 use litex_hal as hal;
 use litex_pac as pac;
@@ -29,6 +19,7 @@ hal::uart! {
 }
 
 #[repr(u16)]
+#[allow(dead_code)]
 enum PocketControls {
     DpadUp     = 1<<0,
     DpadDown   = 1<<1,
@@ -49,9 +40,6 @@ enum PocketControls {
 }
 
 // const TEST_ADDR: *mut u32 = (0xF0001800 + 0x0028) as *mut u32;
-
-const CLOCK_SPEED: u32 = 51_600_000; // FIXME INCORRECT
-const CYCLE_PERIOD_NANOS: f64 = 1_000_000_000.0 / (CLOCK_SPEED as f64);
 
 // Fix for missing main functions
 #[no_mangle]
@@ -93,45 +81,12 @@ const DISPLAY_HEIGHT: usize = 240;
 
 const READ_LENGTH: usize = 0x10000;
 
-fn combine_u32(low: u32, high: u32) -> u64 {
-    ((high as u64) << 32) | (low as u64)
-}
-
-fn get_cycle_count() -> u64 {
-    let peripherals = unsafe { pac::Peripherals::steal() };
-
-    unsafe {
-        // Grab cycle count
-        peripherals.TIMER0.uptime_latch.write(|w| w.bits(1));
-    };
-
-    let low_bits = peripherals.TIMER0.uptime_cycles0.read().bits();
-    // let low_bits = unsafe { TEST_ADDR.read_volatile() };
-    // println!("{low_bits}");
-    let high_bits = peripherals.TIMER0.uptime_cycles1.read().bits();
-    let uptime_cycles = combine_u32(low_bits, high_bits);
-
-    // let prev_uptime_cycles_low =
-    //     LAST_UPTIME_CYCLES_LOW.load(core::sync::atomic::Ordering::Acquire);
-    // let prev_uptime_cycles_high =
-    //     LAST_UPTIME_CYCLES_HIGH.load(core::sync::atomic::Ordering::Acquire);
-
-    // let prev_uptime_cycles = combine_u32(prev_uptime_cycles_low, prev_uptime_cycles_high);
-
-    // // Should always fit in u32
-    // let cycle_duration = (uptime_cycles - prev_uptime_cycles) as u32;
-
-    (CYCLE_PERIOD_NANOS * (uptime_cycles as f64)).floor() as u64
-}
-
 fn render_init(framebuffer_address: *mut u16) {
-    let buffer = unsafe { from_raw_parts_mut(framebuffer_address, DISPLAY_WIDTH * DISPLAY_HEIGHT) };
+    let framebuffer = unsafe { from_raw_parts_mut(framebuffer_address, DISPLAY_WIDTH * DISPLAY_HEIGHT) };
 
     const PIXEL_MAX:usize = DISPLAY_WIDTH * DISPLAY_HEIGHT;
-    let mut pixel_offset:usize = 0;
-    let pixel_buffer = unsafe { from_raw_parts_mut(framebuffer_address, DISPLAY_WIDTH * DISPLAY_HEIGHT) };
     for idx in 0..PIXEL_MAX {
-        pixel_buffer[idx] = 0xFFFF;
+        framebuffer[idx] = 0xFFFF;
     }
 }
 
@@ -152,45 +107,10 @@ fn main() -> ! {
 
     println!("-- Minibreak --");
 
+    // Framebuffer pointer
     let fb:*mut u16 = peripherals.VIDEO_FRAMEBUFFER.dma_base.read().bits() as *mut u16;
 
     render_init(fb);
-
-    // for x in 0..DISPLAY_WIDTH {
-    //     for y in 0..DISPLAY_HEIGHT {
-    //         *pixel(fb, x, y) = 0xFFFF;
-    //     }
-    // }
-
-    // for x in 0..DISPLAY_WIDTH {
-    //     match x % 10 {
-    //         0 => {
-    //             // Blue column of 10
-    //             let y_max = if x % 100 == 0 {
-    //                 // 100 boundary
-    //                 20
-    //             } else {
-    //                 10
-    //             };
-
-    //             for y in 0..y_max {
-    //                 *pixel(fb, x, y) = 0x001F;
-    //             }
-    //         }
-    //         2 | 4 | 6 | 8 => {
-    //             // Even tick of black
-    //             for y in 0..5 {
-    //                 *fb, pixel(x, y) = 0x0000;
-    //             }
-    //         }
-    //         _ => {
-    //             // Bottom line
-    //             *fb, pixel(x, 0) = 0x0000;
-    //         }
-    //     }
-    // }
-
-    // loop {}
 
     // "APP"
     {
@@ -206,8 +126,7 @@ fn main() -> ! {
         let mut wave:u16 = 0;
         let mut lfo:u16 = LFO_MAX/4;
         const FREQ_DELTA:u16 = 150;
-        let mut frame_counter:u8 = 0;
-        let mut first_frame = true;
+//        let mut first_frame = true;
 
         let mut paused = false;
         let mut dead = false;
@@ -219,12 +138,14 @@ fn main() -> ! {
         let mut final_vader_facing = 1;
 
         // Geometry support: 0,0 is top left
+        #[allow(dead_code)] // To remove if code changes
         fn ivec2_within(size:IVec2, at:IVec2) -> bool {
             IVec2::ZERO.cmple(at).all() && size.cmpgt(at).all()
         }
         fn ivec2_le(left:IVec2, right:IVec2) -> bool {
             left.cmple(right).all()
         }
+        #[allow(dead_code)] // To remove if code changes
         fn ivec2_lt(left:IVec2, right:IVec2) -> bool { // Unused
             left.cmplt(right).all()
         }
@@ -260,6 +181,7 @@ fn main() -> ! {
             fn enclose(&self, test:IRect2) -> bool {
                 ivec2_le(self.ul, test.ul) && ivec2_ge(self.br, test.br) // For testing enclose the rects only need to coincide
             }
+            #[allow(dead_code)] // To remove if code changes
             fn size(&self) -> IVec2 {
                 self.br - self.ul
             }
@@ -270,7 +192,7 @@ fn main() -> ! {
                 return IRect2::new(self.ul + by, self.br + by);
             }
             fn force_enclose_x(&self, test:IRect2) -> IRect2 { // ASSUMES SELF SMALLER THAN TEST
-                let mut excess = test.ul.x - self.ul.x;
+                let excess = test.ul.x - self.ul.x;
                 if excess > 0 { return self.offset(IVec2::new(excess, 0)) }
                 let excess = test.br.x - self.br.x;
                 if excess < 0 { return self.offset(IVec2::new(excess, 0)) }
@@ -447,7 +369,7 @@ fn main() -> ! {
                     bleep_high = false;
 
                     // Step one pixel at a time, one axis at a time.
-                    'step: for step in 0..BALL_SPEED {
+                    'step: for _ in 0..BALL_SPEED {
                         for (aid, axis) in IVec2::AXES.into_iter().enumerate() {
                             let v = axis*ball.facing;
                             //println!("TEST!! {}: {:?} = {:?} * {:?}", step, (aid,axis), ball.facing, v);
@@ -506,7 +428,7 @@ fn main() -> ! {
             }
 
             // Audio gen
-            for i in 0..800 { // 800 samples = 1/60 of a second. This will pause us long enough for a frame to pass
+            for _ in 0..800 { // 800 samples = 1/60 of a second. This will pause us long enough for a frame to pass
                 let mut lfo_engaged = false;
                 if (!paused) {
                     let freq_delta = if bleeping>0 {
@@ -535,16 +457,14 @@ fn main() -> ! {
                 unsafe { peripherals.APF_AUDIO.out.write(|w| w.bits(value)) };
             }
 
-            // Progress
-            if (!paused) {
-                first_frame = false;
-            }
-
             unsafe { peripherals.APF_AUDIO.playback_en.write(|w| w.bits(1)) };
+
+            // Progress
+            // if (!paused) {
+            //     first_frame = false;
+            // }
         }
     }
 
-    println!("Finished reading");
-
-    loop {}
+    // Unreachable
 }
