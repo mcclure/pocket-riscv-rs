@@ -1,5 +1,5 @@
 [package]
-name = "riscv-pocket-example"
+name = "minibreak"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,7 +9,8 @@ edition = "2021"
 embedded-alloc = "0.5.0"
 embedded-hal = "0.2.7"
 litex-hal = "0.3.0"
-litex-pac = { path = "crates/litex-pac", features = ["rt"] }
+litex-openfpga = { path = "external/openfpga-litex/lang/rust/crates/litex-openfpga" }
+litex-pac = { path = "external/openfpga-litex/lang/rust/crates/litex-pac", features = ["rt"] }
 nb = "1.1.0"
 riscv = { version = "0.10.1", features = ["critical-section-single-hart"] }
 riscv-rt = "0.11.0"

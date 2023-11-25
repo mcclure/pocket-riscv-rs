@@ -1,1 +1,32 @@
-TODO
+# First time:
+
+git submodule update --init # Remember to repeat every git pull
+
+rustup target add riscv32imac-unknown-none-elf
+rustup install nightly # May require suffix like -x86_64-unknown-linux-gnu
+rustup component add rust-src --toolchain nightly
+cargo +nightly install cargo-binutils
+rustup +nightly component add llvm-tools-preview
+
+# First time (for upload):
+
+Checkout litex from github (https://github.com/enjoy-digital/litex) into cwd, or check it out elsewhere and ln -s the repo dir into .
+In the litex checkout, `pdm init` followed by `pdm install` followed by `pdm add migen pyserial` (do *not* import requirements with pdm init)
+
+# After:
+
+make
+
+# Build docs:
+
+cargo +nightly doc --open
+
+# Upload:
+
+(export PROJECT=`pwd`; export PYTHONPATH="."; (cd litex && source .venv/bin/activate && python3 litex/tools/litex_term.py --kernel $PROJECT/rust.bin --speed 2000000 /dev/ttyUSB0))
+
+# On Windows?:
+# These will probably work in lieu of the makefile:
+
+cargo.exe +nightly build --release
+cargo.exe +nightly objcopy --release -- -O binary rust.bin 

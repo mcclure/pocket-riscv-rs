@@ -12,7 +12,6 @@ use core::sync::atomic::AtomicU32;
 use core::time::Duration;
 use core::cell::UnsafeCell;
 use embedded_hal::prelude::_embedded_hal_blocking_serial_Write;
-use hardware::file::File;
 use num_traits::float::FloatCore;
 
 extern crate alloc;
@@ -21,9 +20,8 @@ use alloc::{boxed::Box, rc::Rc};
 use embedded_alloc::Heap;
 use litex_hal as hal;
 use litex_pac as pac;
+use litex_openfpga::*;
 use riscv_rt::entry;
-
-mod hardware;
 
 // Definition is required for uart_printer.rs to work
 hal::uart! {
@@ -371,16 +369,16 @@ fn main() -> ! {
         for vader in &vaders { fill(fb, vader.rect, VADER_COLOR); }
 
         loop {
-            let mut buffer_fill = peripherals.MAIN.audio_buffer_fill.read().bits();
+            let mut buffer_fill = peripherals.APF_AUDIO.buffer_fill.read().bits();
 
             // Wait for frame
             while buffer_fill > 400 {
                 // Busy wait until the buffer is half empty
-                buffer_fill = peripherals.MAIN.audio_buffer_fill.read().bits();
+                buffer_fill = peripherals.APF_AUDIO.buffer_fill.read().bits();
             }
 
             // Controls
-            let cont1_key = peripherals.MAIN.cont1_key.read().bits() as u16; // Crop out analog sticks
+            let cont1_key = peripherals.APF_INPUT.cont1_key.read().bits() as u16; // Crop out analog sticks
             let cont1_key_edge = (!cont1_key_last) & cont1_key;
             cont1_key_last = cont1_key;
 
@@ -528,7 +526,7 @@ fn main() -> ! {
                 if lfo_engaged { value *= lfo as u32; value /= LFO_MAX as u32; }
                 value = value | (value << 16);
 
-                unsafe { peripherals.MAIN.audio_out.write(|w| w.bits(value)) };
+                unsafe { peripherals.APF_AUDIO.out.write(|w| w.bits(value)) };
             }
 
             // Progress
@@ -536,7 +534,7 @@ fn main() -> ! {
                 first_frame = false;
             }
 
-            unsafe { peripherals.MAIN.audio_playback_en.write(|w| w.bits(1)) };
+            unsafe { peripherals.APF_AUDIO.playback_en.write(|w| w.bits(1)) };
         }
     }
 
