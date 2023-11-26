@@ -126,6 +126,7 @@ fn main() -> ! {
         let mut wave:u16 = 0;
         let mut lfo:u16 = LFO_MAX/4;
         const FREQ_DELTA:u16 = 150;
+        const AUDIO_TARGET:i32 = 48000/60 + 200; // Try to fill audio buffer to this point
 //        let mut first_frame = true;
 
         let mut paused = false;
@@ -136,6 +137,11 @@ fn main() -> ! {
         let mut bleeping = 0;
         let mut blooping = 0;
         let mut final_vader_facing = 0;
+
+        #[cfg(feature = "speed-debug")]
+        const SPEED_DEBUG_RATE:u32 = 1; // Every frame
+        #[cfg(feature = "speed-debug")]
+        let mut missed_deadline:u32 = 0;
 
         // Geometry support: 0,0 is top left
         #[allow(dead_code)] // To remove if code changes
@@ -297,13 +303,16 @@ fn main() -> ! {
         for vader in &vaders { fill(fb, vader.rect, VADER_COLOR); }
 
         loop {
-            let mut buffer_fill = peripherals.APF_AUDIO.buffer_fill.read().bits();
-
-            // Wait for frame
-            while buffer_fill > 400 {
-                // Busy wait until the buffer is half empty
-                buffer_fill = peripherals.APF_AUDIO.buffer_fill.read().bits();
+            // Wait for missed-frame indication (or) post-frame blank
+            // (Vsync will go on shortly after vblank, so we check it first to clear it)
+//            let mut loops = 0;
+//            let cause;
+            loop {
+                if 0 != peripherals.APF_VIDEO.vsync_status.read().bits() { /*cause=1;*/ break; }
+//                if 0 != peripherals.APF_VIDEO.vblank_status.read().bits() { cause=2; break; }
+//                loops += 1;
             }
+//            println!("Loops {} Exit cause {}", loops, cause);
 
             // Controls
             let cont1_key = peripherals.APF_INPUT.cont1_key.read().bits() as u16; // Crop out analog sticks
@@ -431,8 +440,17 @@ fn main() -> ! {
                 }
             }
 
+            #[cfg(feature = "speed-debug")]
+            if 0 == peripherals.APF_VIDEO.vblank_status.read().bits() {
+                missed_deadline += 1;
+                if 1== missed_deadline % SPEED_DEBUG_RATE {
+                    println!("Too slow! Drawing exceeded vblank deadline #{}", missed_deadline);
+                }
+            }
+
             // Audio gen
-            for _ in 0..800 { // 800 samples = 1/60 of a second. This will pause us long enough for a frame to pass
+            let audio_needed = AUDIO_TARGET - peripherals.APF_AUDIO.buffer_fill.read().bits() as i32;
+            for _ in 0..audio_needed { // 800 samples = 1/60 of a second. This will pause us long enough for a frame to pass
                 let mut lfo_engaged = false;
                 if (!paused) {
                     let freq_delta = if bleeping>0 {
