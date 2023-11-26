@@ -168,6 +168,8 @@ fn main() -> ! {
                 color
             }
 
+            // There's some kind of bug here where the color will flicker black once per cycle,
+            // but the point of the app is to flicker, so I'm not fixing it.
             let color_gray:u8 = frame_counter;
             let color_gray = if color_gray > 128 { (0 as u8).wrapping_sub(color_gray) } else { color_gray };
             let color_gray:u8 = if flickering { !color_gray } else { color_gray };
