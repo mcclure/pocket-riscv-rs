@@ -1,21 +1,20 @@
-This is a repo meant to host Rust programs for agg23's [Pocket RISC-V](https://github.com/agg23/openfpga-litex) platform. While Rust *can* be built out of the openfpga-litex repo directly, this repo references openfpga-litex as a git submodule (in `external/openfpga-litex`) so that a single piece of Rust code can be easily tested with different versions of openfpga-litex.
-
-The code in this commit is a small brick breaking game ("minibreak") that shows off basic capabilities of the core: It has controls (left and right d-pad, select to pause), reads the system timer (for RNG), generates sound, and draws in the framebuffer.
-
-If you wish to fork this, make sure to change the app name in Cargo.toml (it gets built into the application) and the license below (assuming do not wish to release as public domain). You may also prefer to remove the app-specific dependency "glam".
+This is the source of a Rust program that makes glitchy and (hopefully) compellingly abrasive sounds and animations. It is distributed as "ot3" and is meant to run on agg23's [Pocket RISC-V](https://github.com/agg23/openfpga-litex) platform. It uses every button on the Analogue Pocket. **Warning:** This application is very loud, and can cause the entire screen to flash.
 
 # Usage
 
 See [run.txt](run.txt)
 
-# Getting Started
-
-To get started with openfpga-litex, make sure to notice the [README](external/openfpga-litex), [control.md](external/openfpga-litex/docs/control.md), and the [existing Rust examples](external/openfpga-litex/lang/rust/examples) in openfpga-litex; and the "build docs" command in [run.txt](run.txt) (most useful for the litex-pac and litex-openfpga crate docs, since litex-pac contains the Rust version of control.md).
-
-Once you have built a `rust.bin`, you have two options for deployment: You can live upload to a running copy of the Pocket RISC-V core as described in [run.txt](run.txt), or you can create a new copy of the Pocket RISC-V core as described in the [Analogue docs](https://www.analogue.co/developer/docs/packaging-a-core) and include rust.bin as `boot.bin` in the `/Assets/.../common` directory.
-
 # License
 
-The Rust code in this directory is written by Andi McClure <<andi.m.mcclure@gmail.com>> (based on the openfpga-litex examples) and is intended as example code. It is available under [Creative Commons Zero](https://creativecommons.org/publicdomain/zero/1.0/legalcode), in other words, it is public domain. If you substantially reuse the code, a credit would be appreciated, but this is not legally required.
+This program is made available under the MIT license:
 
-Code in submodules or crates, such as openfpga-litex, will of course have its own license.
+> (C) 2023 Andi McClure
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+>
+>
+> THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+It makes use of hilbert_2d by Humberto Duarte and openfpga-litex by Adam Gastineau, which have MIT licenses in their submodules in [external/](external/).

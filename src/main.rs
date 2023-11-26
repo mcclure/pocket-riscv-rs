@@ -12,6 +12,7 @@ use litex_hal as hal;
 use litex_pac as pac;
 use litex_openfpga::*;
 use riscv_rt::entry;
+use core::cell::UnsafeCell;
 
 // Definition is required for uart_printer.rs to work
 hal::uart! {
@@ -86,7 +87,7 @@ fn render_init(framebuffer_address: *mut u16) {
 
     const PIXEL_MAX:usize = DISPLAY_WIDTH * DISPLAY_HEIGHT;
     for idx in 0..PIXEL_MAX {
-        framebuffer[idx] = 0xFFFF;
+        framebuffer[idx] = 0;
     }
 }
 
@@ -105,7 +106,7 @@ fn main() -> ! {
     // Initialize the allocator BEFORE you use it
     unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) };
 
-    println!("-- Minibreak --");
+    println!("-- ot3 --");
 
     // Framebuffer pointer
     let fb:*mut u16 = peripherals.VIDEO_FRAMEBUFFER.dma_base.read().bits() as *mut u16;
@@ -114,377 +115,231 @@ fn main() -> ! {
 
     // "APP"
     {
-        use glam::IVec2;
-        use alloc::vec::Vec;
+        let main_modulus: UnsafeCell<i32> = UnsafeCell::new(254);
 
-        // Config
-        let config_chaos = 0; // 0-2 inclusive
-        const CONFIG_IMMORTAL:bool = false;
-        const LFO_MAX:u16 = 48000;
-
-        // Basic
-        let mut wave:u16 = 0;
-        let mut lfo:u16 = LFO_MAX/4;
-        const FREQ_DELTA:u16 = 150;
-        const AUDIO_TARGET:i32 = 48000/60 + 200; // Try to fill audio buffer to this point
-//        let mut first_frame = true;
-
-        let mut paused = false;
-        let mut dead = false;
-        let mut won = false;
-        let mut cont1_key_last = 0;
-        let mut bleep_high = false;
-        let mut bleeping = 0;
-        let mut blooping = 0;
-        let mut final_vader_facing = 0;
-
-        #[cfg(feature = "speed-debug")]
-        const SPEED_DEBUG_RATE:u32 = 1; // Every frame
-        #[cfg(feature = "speed-debug")]
-        let mut missed_deadline:u32 = 0;
-
-        // Geometry support: 0,0 is top left
-        #[allow(dead_code)] // To remove if code changes
-        fn ivec2_within(size:IVec2, at:IVec2) -> bool {
-            IVec2::ZERO.cmple(at).all() && size.cmpgt(at).all()
-        }
-        fn ivec2_le(left:IVec2, right:IVec2) -> bool {
-            left.cmple(right).all()
-        }
-        #[allow(dead_code)] // To remove if code changes
-        fn ivec2_lt(left:IVec2, right:IVec2) -> bool { // Unused
-            left.cmplt(right).all()
-        }
-        fn ivec2_ge(left:IVec2, right:IVec2) -> bool {
-            left.cmpge(right).all()
-        }
-        fn ivec2_gt(left:IVec2, right:IVec2) -> bool {
-            left.cmpgt(right).all()
-        }
-        #[derive(Debug, Clone, Copy)]
-        struct IRect2 { // br is non-inclusive
-            ul: IVec2,  // Upper left
-            br: IVec2   // Bottom right
-        }
-        impl IRect2 {
-            fn new(ul:IVec2, br:IVec2) -> Self { Self {ul, br} }
-            fn new_centered(center:IVec2, size:IVec2) -> Self {
-                let br = center + size/2; // Bias placement toward upper-left
-                let ul = br - size;
-                Self {ul, br}
-            }
-            fn within(&self, test:IVec2) -> bool {
-                ivec2_le(self.ul, test) && ivec2_gt(self.br, test)
-            }
-            fn intersect(&self, test:IRect2) -> bool { // Will misbehave on 0-size rects
-                self.within(test.ul) || {
-                    let in_br = test.br+IVec2::NEG_ONE; // For testing within the point just inside must be in
-                    self.within(in_br) || // All 4 corners
-                    self.within(IVec2::new(test.ul.x, in_br.y)) ||
-                    self.within(IVec2::new(in_br.x, test.ul.y))
+        let mut next_byte = {
+            let mut n:i32 = 0;
+            let mut i:i32 = 1;
+            let main_modulus = &main_modulus;
+            move || {
+                n = n.wrapping_add(i);
+                let v:u8 = (n as u32) as u8;
+                let modulus = unsafe { *main_modulus.get() };
+                if n>modulus || i<=0 {
+                    i = i.wrapping_add(1);
+                    n = n % modulus;
                 }
+                v
             }
-            fn enclose(&self, test:IRect2) -> bool {
-                ivec2_le(self.ul, test.ul) && ivec2_ge(self.br, test.br) // For testing enclose the rects only need to coincide
-            }
-            #[allow(dead_code)] // To remove if code changes
-            fn size(&self) -> IVec2 {
-                self.br - self.ul
-            }
-            fn center(&self) -> IVec2 {
-                (self.br + self.ul)/2
-            }
-            fn offset(&self, by:IVec2) -> IRect2 {
-                return IRect2::new(self.ul + by, self.br + by);
-            }
-            fn force_enclose_x(&self, test:IRect2) -> IRect2 { // ASSUMES SELF SMALLER THAN TEST
-                let excess = test.ul.x - self.ul.x;
-                if excess > 0 { return self.offset(IVec2::new(excess, 0)) }
-                let excess = test.br.x - self.br.x;
-                if excess < 0 { return self.offset(IVec2::new(excess, 0)) }
-                self.clone()
-            }
-        }
-
-        if false { // "FUNCTIONAL TESTS"
-            let rect = IRect2::new(IVec2::new(5, 5), IVec2::new(15,15));
-            for y in 0..3 {
-                for x in 0..3 {
-                    let v = IVec2::new(x*10,y*10);
-                    assert_eq!(rect.within(v), (x==1 && y==1), "Incorrect within! rect: {:?} v: {:?}", rect, v);
-                    let r2 = IRect2::new_centered(v, IVec2::ONE*2);
-                    assert_eq!(rect.enclose(r2), (x==1 && y==1), "Incorrect enclose! rect: {:?} v: {:?}", rect, r2);
-                }
-            }
-            for y in 0..5 {
-                for x in 0..5 {
-                    let v = IVec2::new(x*5,y*5);
-                    let r2 = IRect2::new_centered(v, IVec2::ONE*2);
-                    assert_eq!(rect.intersect(r2), !(x==0 || x==4 || y==0 || y==4), "Incorrect intersect! rect: {:?} v: {:?}", rect, r2);
-                }
-            }
-        }
-
-        let screen = IRect2::new(IVec2::ZERO, IVec2::new(DISPLAY_WIDTH as i32, DISPLAY_HEIGHT as i32));
-
-        struct Vader {
-            rect:IRect2
-        }
-
-        struct Ball {
-            rect:IRect2,
-            facing:IVec2
-        }
-
-        struct Player {
-            rect:IRect2,
-            facing:i32 // l/r
-        }
-
-        let mut vaders: Vec<Vader> = Default::default();
-        let mut balls: Vec<Ball> = Default::default();
-        let mut players: Vec<Player> = Default::default();
-
-        const PLAYER_SIZE:IVec2 = IVec2::new(40, 8);
-        const PLAYER_START:IVec2 = IVec2::new(DISPLAY_WIDTH as i32/2, DISPLAY_HEIGHT as i32-20-PLAYER_SIZE.y/2);
-        const PLAYER_COLOR:u16 = 0b11111_101010_11111;
-        const PLAYER_SPEED:i32 = 2;
-
-        const BALL_SIZE:IVec2 = IVec2::new(4,4);
-        let ball1_start:IVec2 = PLAYER_START + IVec2::new(0, -30);
-        const BALL_COLOR:u16 = 0b00000_000000_11111 ^ 0xFFFF;
-        const BALL_SPEED:i32 = 3;
-        const BALL_FACING:IVec2 = IVec2::new(1,-1);
-
-        const REFLECTS:[IVec2;2] = [ IVec2::new(-1,1), IVec2::new(1,-1) ];
-        const REFLECT_BLEEP:u16 = 800*2;
-
-        const DEATH_BLOOP_STROBE:u16 = 8*800;
-        const DEATH_BLOOP:u16 = DEATH_BLOOP_STROBE*6;
-
-        const VADER_COLS:i32 = 8;
-        const VADER_ROWS:i32 = 4;
-        const VADER_SIZE:IVec2 = IVec2::new(20, 12);
-        const VADER_PADDING:IVec2 = IVec2::new(10,20);
-        const VADER_ORIGIN:IVec2 = IVec2::new((DISPLAY_WIDTH as i32-(VADER_COLS*VADER_SIZE.x + (VADER_COLS-1)*VADER_PADDING.x))/2, 20);
-        const VADER_COLOR:u16 = 0b11111_000000_00000 ^ 0xFFFF;
-
-        assert_eq!(VADER_ORIGIN.x+VADER_PADDING.x >= 0, true, "Screen too narrow for vaders");
-
-        players.push(Player { rect:IRect2::new_centered(PLAYER_START, PLAYER_SIZE), facing:0 });
-
-        let ball_facing = { // Randomly start moving left or right; use the current UTC as a very weak RNG
-            let mut ball_facing = BALL_FACING;
-            if 0 == peripherals.APF_RTC.unix_seconds.read().bits() % 2 { ball_facing.x *= -1 }
-            ball_facing
         };
-        balls.push(Ball { rect:IRect2::new_centered(ball1_start, BALL_SIZE), facing:ball_facing });
 
-        for y in 0..VADER_ROWS {
-            for x in 0..VADER_COLS {
-                let ul = VADER_ORIGIN + IVec2::new(x, y)*(VADER_SIZE + VADER_PADDING);
-                vaders.push(Vader { rect:IRect2::new(ul, ul+VADER_SIZE) });
-            }
+        fn to_565(byte:u8, color:u8) -> u16 {
+            let byte = byte as u16;
+            let mut value:u16 = 0;
+            let r:u16 = if color & 1 == 0 { 0 } else { 0xFFFF };
+            let g:u16 = if color & 2 == 0 { 0 } else { 0xFFFF };
+            let b:u16 = if color & 4 == 0 { 0 } else { 0xFFFF };
+            value |= ( ((byte^r) & 0b11110000) >> 4);
+            value <<= 1;
+            value |= ( ((byte^r) & 0b00001000) >> 3);
+            value <<= 4;
+            value |= ( ((byte^g) & 0b11110000) >> 4);
+            value <<= 2;
+            value |= ( ((byte^g) & 0b00000110) >> 1);
+            value <<= 4;
+            value |= ( ((byte^b) & 0b11110000) >> 4);
+            value <<= 1;
+            value |= ( ((byte^b) & 0b00000001) >> 0);
+            value
         }
 
-        // Gfx support
+        // Change sample rate and mulaw
+        // Note: An entirely unreasonable amount of the "game logic" occurs here
+        let mut next_short = {
+            let main_modulus = &main_modulus;
+            let mut downsample:u32 = 8;
+            let mut down_n: u32 = downsample;
+            let mut last:u16 = 0;
 
-        fn fill(fb: *mut u16, rect:IRect2, color:u16) {
-            for y in rect.ul.y..rect.br.y {
-                for x in rect.ul.x..rect.br.x {
-                    *pixel(fb, x as usize,y as usize) ^= color; // Assume positive
-                }
-            }
-        }
+            let mut pixel_offset = 0;
 
-        // Initial draw
-        for player in &players { fill(fb, player.rect, PLAYER_COLOR); }
-        for ball in &balls { fill(fb, ball.rect, BALL_COLOR); }
-        for vader in &vaders { fill(fb, vader.rect, VADER_COLOR); }
+            let mut cont1_key_last = 0;
 
-        loop {
-            // Wait for missed-frame indication (or) post-frame blank
-            // (Vsync will go on shortly after vblank, so we check it first to clear it)
-//            let mut loops = 0;
-//            let cause;
-            loop {
-                if 0 != peripherals.APF_VIDEO.vsync_status.read().bits() { /*cause=1;*/ break; }
-//                if 0 != peripherals.APF_VIDEO.vblank_status.read().bits() { cause=2; break; }
-//                loops += 1;
-            }
-//            println!("Loops {} Exit cause {}", loops, cause);
+            let mut paused = false;
 
-            // Controls
-            let cont1_key = peripherals.APF_INPUT.cont1_key.read().bits() as u16; // Crop out analog sticks
-            let cont1_key_edge = (!cont1_key_last) & cont1_key;
-            cont1_key_last = cont1_key;
+            let mut hilbert_order:usize = 5;
 
-            use PocketControls::*;
+            let mut clear_want = false;
 
-            // Pause
-            if !dead && cont1_key_edge & FaceSelect as u16 != 0 {
-                paused = !paused;
-            }
+            let mut color_scheme_raw:u8 = 0;
+            let mut color_scheme:u8 = 0;
 
-            // Mechanics
+            move || {
+                if down_n >= downsample {
+                    // Controls
+                    let cont1_key = peripherals.APF_INPUT.cont1_key.read().bits() as u16; // Crop out analog sticks
+                    let cont1_key_edge = (!cont1_key_last) & cont1_key;
+                    cont1_key_last = cont1_key;
 
-            if !paused && !dead && !won {
-                // Vader
-                // (When one block is left, have it start moving so you aren't stuck unable to hit it.)
-                if vaders.len() == 1 {
-                    let vader = &mut vaders[0];
-                    fill(fb, vader.rect, VADER_COLOR);
-                    if final_vader_facing == 0 {
-                        final_vader_facing = if vader.rect.center().x > DISPLAY_WIDTH as i32/2
-                            { -1 } else { 1 }
+                    use PocketControls::*;
+
+                    // Pause
+                    if cont1_key_edge & FaceSelect as u16 != 0 {
+                        paused = !paused;
                     }
-                    let vader_move = IVec2::new(final_vader_facing, 0);
-                    let rect = vader.rect.offset(vader_move);
-                    vader.rect = if screen.enclose(rect) { rect } else {
-                        final_vader_facing = -final_vader_facing;
-                        vader.rect.offset(-vader_move)
-                    };
-                    fill(fb, vader.rect, VADER_COLOR);
-                }
 
-                // Player
-                for player in &mut players {
-                    // Controls: Movement
-                    const LR_MASK:u16 = DpadLeft as u16 | DpadRight as u16;
-                    player.facing = if cont1_key & LR_MASK == LR_MASK { // Impossible on Analogue builtin but who knows about bluetooth
-                        if cont1_key_edge & DpadLeft as u16 != 0 { -1 }
+                    // Size control
+                    let order_bump:isize = if cont1_key_edge & DpadLeft as u16 != 0 { -1 }
                         else if cont1_key_edge & DpadRight as u16 != 0 { 1 }
-                        else { player.facing }
-                    } else {
-                        if cont1_key & DpadLeft as u16 != 0 { -1 }
-                        else if cont1_key & DpadRight as u16 != 0 { 1 }
-                        else { 0 }
-                    };
+                        else { 0 };
 
-                    if player.facing != 0 {
-                        if config_chaos < 2 {
-                            fill(fb, player.rect, PLAYER_COLOR);
+                    if order_bump != 0 {
+                        let hilbert_order_new = (hilbert_order as isize + order_bump) as usize;
+                        if hilbert_order_new >= 2 && hilbert_order_new <= 8 {
+                            hilbert_order = hilbert_order_new;
+                            pixel_offset = 0;
+                            //if order_bump>0 {
+                                clear_want = true;
+                            //}
+                        }
+                    }
+
+                    // Speed control
+                    let speed_bump:i32 = if cont1_key_edge & DpadUp as u16 != 0 { -1 }
+                        else if cont1_key_edge & DpadDown as u16 != 0 { 1 }
+                        else { 0 };
+
+                    if speed_bump != 0 {
+                        let downsample_new = (downsample as i32 + speed_bump) as u32;
+                        if downsample_new > 0 && downsample_new < 32 {
+                            downsample = downsample_new;
+                        }
+                    }
+
+                    // Algorithm control
+                    // Left-right: Slow
+                    let modulus_bump:i32 = if cont1_key_edge & FaceY as u16 != 0 { -1 }
+                        else if cont1_key_edge & FaceA as u16 != 0 { 1 }
+                        else { 0 };
+
+                    if modulus_bump != 0 {
+                        let modulus_old = unsafe { *main_modulus.get() };
+                        let modulus_new = modulus_old + modulus_bump;
+                        if modulus_new > 1 && modulus_new < 1<<17 {
+                            unsafe { *main_modulus.get() = modulus_new; };
+                        }
+                    }
+
+                    // Up-down: Fast
+                    let modulus_bump:i32 = if cont1_key_edge & FaceB as u16 != 0 { -256 }
+                        else if cont1_key_edge & FaceX as u16 != 0 { 256 }
+                        else { 0 };
+
+                    if modulus_bump != 0 {
+                        let modulus_old = unsafe { *main_modulus.get() };
+                        let modulus_new = modulus_old + modulus_bump;
+                        if modulus_new > 1 && modulus_new < 1<<17 {
+                            unsafe { *main_modulus.get() = modulus_new; };
+                        }
+                    }
+
+                    // Color control
+                    let color_bump:i8 = if cont1_key_edge & TrigL1 as u16 != 0 { -1 }
+                        else if cont1_key_edge & TrigR1 as u16 != 0 { 1 }
+                        else { 0 };
+
+                    if color_bump != 0 {
+                        let color_new = (color_scheme_raw as i8 + color_bump).rem_euclid(8) as u8;
+    //                    if color_new >= 0 && color_new < 8 {
+                            color_scheme_raw = color_new as u8;
+                            color_scheme = color_scheme_raw;
+                            if color_scheme & 4 != 0 { color_scheme ^= 3; }
+    //                    }
+                    }
+
+                    if !paused { 
+                        // Sound
+                        let byte = next_byte();
+                        last = mulaw_decode(byte);
+
+                        // Draw pixel
+                        let hilbert_axis:usize = (1<<hilbert_order);
+                        let hilbert_max:usize = hilbert_axis*hilbert_axis;
+
+                        let hilbert_scale:usize = if hilbert_order < 7 { DISPLAY_HEIGHT/hilbert_axis } else { DISPLAY_WIDTH/hilbert_axis }; // FIXME: Assumes screen is wider than tall and "7" is the attractive crossover point 
+                        let hilbert_recenter_y:isize = (DISPLAY_HEIGHT as isize-hilbert_axis as isize*hilbert_scale as isize)/2;
+                        let hilbert_recenter_x:isize = (DISPLAY_WIDTH as isize-hilbert_axis as isize*hilbert_scale as isize)/2;
+
+                        let color = to_565(byte, color_scheme);
+                        let (pixel_x, pixel_y) = hilbert_2d::usize::h2xy_discrete(pixel_offset, hilbert_order, hilbert_2d::Variant::Liu1);
+
+                        if clear_want { // This is kinda expensive :(
+                            render_init(fb);
+                            clear_want = false;
                         }
 
-                        player.rect = player.rect.offset(IVec2::new(player.facing*PLAYER_SPEED, 0))
-                            .force_enclose_x(screen);
-
-                        fill(fb, player.rect, PLAYER_COLOR);
-                    }
-                }
-
-                // Ball
-                for ball in &mut balls {
-                    if config_chaos < 1 {
-                        fill(fb, ball.rect, BALL_COLOR);
-                    }
-
-                    bleep_high = false;
-
-                    // Step one pixel at a time, one axis at a time.
-                    'step: for _ in 0..BALL_SPEED {
-                        for (aid, axis) in IVec2::AXES.into_iter().enumerate() {
-                            let v = axis*ball.facing;
-                            //println!("TEST!! {}: {:?} = {:?} * {:?}", step, (aid,axis), ball.facing, v);
-                            let rect = ball.rect.offset(v);
-                            let mut reflect = false;
-                            if !screen.enclose(rect) {
-                                if v.y<=0 || CONFIG_IMMORTAL {
-                                    reflect = true;
-                                } else {
-                                    // Touched bottom of screen. Game over.
-                                    dead = true;
-                                    blooping = DEATH_BLOOP;
-                                    break 'step;
+                        if hilbert_recenter_y >= 0 { // If square fits within screen, skip safety test. // FIXME: Assumes screen is wider than tall; in future that might not be true.
+                            for sub_pixel_y in 0..hilbert_scale {
+                                for sub_pixel_x in 0..hilbert_scale {
+                                    let true_pixel_x = pixel_x*hilbert_scale + sub_pixel_x + hilbert_recenter_x as usize;
+                                    let true_pixel_y = pixel_y*hilbert_scale + sub_pixel_y + hilbert_recenter_y as usize;
+                                    *pixel(fb, true_pixel_x, true_pixel_y) = color;
                                 }
                             }
-                            for player in &players {
-                                if reflect { break; }
-                                if player.rect.intersect(rect) {
-                                    reflect = true;
-                                    if v.y>0 {
-                                        ball.facing.x = if ball.rect.center().x > player.rect.center().x
-                                            { 1 } else { -1 }
+                        } else { // Square larger than screen
+                            for sub_pixel_y in 0..hilbert_scale {
+                                for sub_pixel_x in 0..hilbert_scale {
+                                    let true_pixel_x:isize = (pixel_x*hilbert_scale + sub_pixel_x) as isize + hilbert_recenter_x;
+                                    let true_pixel_y:isize = (pixel_y*hilbert_scale + sub_pixel_y) as isize + hilbert_recenter_y;
+                                    if true_pixel_y>= 0 && true_pixel_y < DISPLAY_HEIGHT as isize {
+                                        *pixel(fb, true_pixel_x as usize, true_pixel_y as usize) = color;
                                     }
                                 }
                             }
-                            let mut destroy:Option<usize> = None;
-                            for (idx,vader) in vaders.iter().enumerate() {
-                                if reflect { break; }
-                                if vader.rect.intersect(rect) {
-                                    reflect = true;
-                                    destroy = Some(idx);
-                                    bleep_high = true;
-                                    fill(fb, vader.rect, VADER_COLOR);
-                                }
-                            }
-                            ball.rect = if !reflect {
-                                rect
-                            } else {
-                                ball.facing *= REFLECTS[aid];
-                                bleeping = REFLECT_BLEEP;
-                                ball.rect.offset(-v)
-                            };
-                            if let Some(idx) = destroy { // Destroy one vader
-                                vaders.remove(idx);
-                                if vaders.len() == 0 {
-                                    won = true;
-                                    blooping = DEATH_BLOOP;
-                                    break 'step;
-                                }
-                            }
                         }
+
+                        pixel_offset += 1;
+                        if pixel_offset >= hilbert_max { pixel_offset = 0; }
                     }
-
-                    fill(fb, ball.rect, BALL_COLOR);
+                    down_n = 0;
                 }
+                down_n += 1;
+                last
+            }
+        };
+
+        // http://neyric.com/2006/10/14/decoding-mu-law-audio-stream-to-pcm/
+        fn mulaw_decode(mulaw:u8) -> u16 {
+            let mut mulaw = mulaw;
+            mulaw = !mulaw;
+            let sign:u8 = mulaw & 0x80;
+            let exponent:u32 = (mulaw as u32 & 0x70) >> 4;
+            let mut data:i32 = (mulaw & 0x0f) as i32;
+            data |= 0x10;
+            data <<= 1;
+            data += 1;
+            data <<= exponent + 2;
+            data -= 0x84;
+            ((if sign == 0 { data } else { -data }) as u32) as u16
+        }
+
+        loop {
+            let mut buffer_fill = peripherals.APF_AUDIO.buffer_fill.read().bits();
+
+            while buffer_fill > 10 {
+                // Busy wait until the buffer is mostly empty
+                buffer_fill = peripherals.APF_AUDIO.buffer_fill.read().bits();
             }
 
-            #[cfg(feature = "speed-debug")]
-            if 0 == peripherals.APF_VIDEO.vblank_status.read().bits() {
-                missed_deadline += 1;
-                if 1== missed_deadline % SPEED_DEBUG_RATE {
-                    println!("Too slow! Drawing exceeded vblank deadline #{}", missed_deadline);
-                }
-            }
-
-            // Audio gen
-            let audio_needed = AUDIO_TARGET - peripherals.APF_AUDIO.buffer_fill.read().bits() as i32;
-            for _ in 0..audio_needed { // 800 samples = 1/60 of a second. This will pause us long enough for a frame to pass
-                let mut lfo_engaged = false;
-                if (!paused) {
-                    let freq_delta = if bleeping>0 {
-                        bleeping -= 1;
-                        if bleep_high { FREQ_DELTA*4 } else { FREQ_DELTA*2 }
-                    } else if blooping>0 {
-                        blooping -= 1;
-                        if blooping == 0 { paused = true; }
-                        if 0!=(blooping/DEATH_BLOOP_STROBE)%2 {
-                            if !won { FREQ_DELTA/2 } else { FREQ_DELTA*4 }
-                        } else { 0 }
-                    } else {
-                        lfo_engaged = true;
-                        FREQ_DELTA
-                    };
-                    wave = wave.wrapping_add(freq_delta);
-
-                    lfo = (lfo+1)%LFO_MAX;
-                }
-
-                let mut value:u32 = wave as u32;
-                value = value >> 4;
-                if lfo_engaged { value *= lfo as u32; value /= LFO_MAX as u32; }
+            for _ in 0..256 {
+                let mut value:u32 = next_short() as u32;
+                //value = value / 4;
                 value = value | (value << 16);
 
-                unsafe { peripherals.APF_AUDIO.out.write(|w| w.bits(value)) };
+                peripherals.APF_AUDIO.out.write(|w| unsafe { w.bits(value) })
             }
 
             unsafe { peripherals.APF_AUDIO.playback_en.write(|w| w.bits(1)) };
-
-            // Progress
-            // if (!paused) {
-            //     first_frame = false;
-            // }
         }
     }
 
