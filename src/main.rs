@@ -138,10 +138,15 @@ fn main() -> ! {
         let mut blooping = 0;
         let mut final_vader_facing = 0;
 
-        #[cfg(feature = "speed-debug")]
-        const SPEED_DEBUG_RATE:u32 = 1; // Every frame
-        #[cfg(feature = "speed-debug")]
-        let mut missed_deadline:u32 = 0;
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "speed-debug")] {
+                const SPEED_DEBUG_RATE:u32 = 1; // Every frame
+                let mut frame_already_overdue:bool = false;
+                let mut video_frame_counter_last:Option<u32> = None;
+                let mut missed_deadline_count:u32 = 0;
+                let mut missed_deadline_already = false;
+            }
+        }
 
         // Geometry support: 0,0 is top left
         #[allow(dead_code)] // To remove if code changes
@@ -303,16 +308,39 @@ fn main() -> ! {
         for vader in &vaders { fill(fb, vader.rect, VADER_COLOR); }
 
         loop {
-            // Wait for missed-frame indication (or) post-frame blank
-            // (Vsync will go on shortly after vblank, so we check it first to clear it)
-//            let mut loops = 0;
-//            let cause;
             loop {
-                if 0 != peripherals.APF_VIDEO.vsync_status.read().bits() { /*cause=1;*/ break; }
-//                if 0 != peripherals.APF_VIDEO.vblank_status.read().bits() { cause=2; break; }
-//                loops += 1;
+                let video = peripherals.APF_VIDEO.video.read();
+                let frame_ready = video.vblank_triggered().bit();
+
+                // Complex tracking to see if frames were skipped
+                cfg_if::cfg_if! {
+                    if #[cfg(feature = "speed-debug")] {
+                        let frame_ready = frame_ready || frame_already_overdue;
+                        if frame_ready {
+                            let video_frame_counter = video.frame_counter().bits();
+                            if let Some(video_frame_counter_last) = video_frame_counter_last {
+                                let gap = video_frame_counter as i32 - video_frame_counter_last as i32;
+                                if gap > 1 {
+                                    if 0== missed_deadline_count % SPEED_DEBUG_RATE {
+                                        println!("Too slow! Dropped an entire frame (frames missing {}; fail #{})", gap-1, missed_deadline_count);
+                                    }
+                                    missed_deadline_count += 1;
+                                } else {
+                                    if missed_deadline_already { missed_deadline_count += 1 }
+                                    if gap <= 0 {
+                                        println!("Catastrophic failure: Video counts no frames between frames (gap of {})", gap);
+                                    }
+                                }
+                            }
+                            video_frame_counter_last = Some(video_frame_counter);
+                            frame_already_overdue = false;
+                            missed_deadline_already = false;
+                        }
+                    }
+                }
+
+                if frame_ready { break; }
             }
-//            println!("Loops {} Exit cause {}", loops, cause);
 
             // Controls
             let cont1_key = peripherals.APF_INPUT.cont1_key.read().bits() as u16; // Crop out analog sticks
@@ -441,11 +469,15 @@ fn main() -> ! {
             }
 
             #[cfg(feature = "speed-debug")]
-            if 0 == peripherals.APF_VIDEO.vblank_status.read().bits() {
-                missed_deadline += 1;
-                if 1== missed_deadline % SPEED_DEBUG_RATE {
-                    println!("Too slow! Drawing exceeded vblank deadline #{}", missed_deadline);
+            {
+                let video = peripherals.APF_VIDEO.video.read();
+                if !video.vblank_status().bit() { // Status has already gone low
+                    if 0== missed_deadline_count % SPEED_DEBUG_RATE {
+                        println!("Too slow! Drawing finished outside vblank deadline (fail #{})", missed_deadline_count);
+                    }
+                    missed_deadline_already = true;
                 }
+                frame_already_overdue = video.vblank_triggered().bit();
             }
 
             // Audio gen

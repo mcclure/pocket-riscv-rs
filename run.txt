@@ -1,6 +1,6 @@
-# First time:
+### First time:
 
-git submodule update --init # Remember to repeat every git pull
+git submodule update --init --recursive # Remember to repeat every git pull
 
 rustup target add riscv32imac-unknown-none-elf
 rustup install nightly # May require suffix like -x86_64-unknown-linux-gnu
@@ -8,39 +8,44 @@ rustup component add rust-src --toolchain nightly
 cargo +nightly install cargo-binutils
 rustup +nightly component add llvm-tools-preview
 
-# First time (for upload):
+### First time (for upload):
 
-Checkout litex from github (https://github.com/enjoy-digital/litex) into cwd, or check it out elsewhere and ln -s the repo dir into .
-In the litex checkout, `pdm init` followed by `pdm install` (do *not* import requirements with pdm init)
-Then for developer-key serial: `pdm add migen pyserial`
-OR for JTAG: `pdm add migen requests` and you will also need to install openocd
+ln -s external/openfpga-litex/litex/vendor/litex . # We need a copy of litex; --recursive on submodule update already got us one
+# Then:
+# In the `./litex` dir, `pdm init` followed by `pdm install` (do *not* import requirements with pdm init)
+# Then for developer-key serial: `pdm add migen pyserial`
+# OR for JTAG: `pdm add migen requests` and you will also need to install openocd
 
-# After:
+### After:
 
 make
 
-# Build docs:
+### Build docs:
 
 cargo +nightly doc --open
 
-# Upload:
+### Upload:
 
 (export PROJECT=`pwd`; export PYTHONPATH="."; (cd litex && source .venv/bin/activate && python3 litex/tools/litex_term.py --kernel $PROJECT/rust.bin --speed 2000000 /dev/ttyUSB0))
 
-# Monitor println (no upload):
+### Monitor println (no upload):
 
 (export PROJECT=`pwd`; export PYTHONPATH="."; (cd litex && source .venv/bin/activate && python3 litex/tools/litex_term.py --speed 2000000 /dev/ttyUSB0))
 
-# Upload (JTAG):
+### Upload (JTAG):
 
 (export PROJECT=`pwd`; export PYTHONPATH="."; (cd litex && source .venv/bin/activate && python3 litex/tools/litex_term.py --jtag-config=openocd_usb_blaster.cfg --kernel $PROJECT/rust.bin jtag))
 
-# Monitor println (no upload):
+### Monitor println (no upload):
 
 (export PROJECT=`pwd`; export PYTHONPATH="."; (cd litex && source .venv/bin/activate && python3 litex/tools/litex_term.py --jtag-config=openocd_usb_blaster.cfg jtag))
 
-# On Windows?:
-# These will probably work in lieu of the makefile:
+### Run with speed debug printlns
+
+make RUST_ARGS="--features speed-debug"
+
+### On Windows?:
+### These will probably work in lieu of the makefile:
 
 cargo.exe +nightly build --release
 cargo.exe +nightly objcopy --release -- -O binary rust.bin 
