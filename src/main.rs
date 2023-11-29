@@ -349,6 +349,11 @@ fn main() -> ! {
 
             use PocketControls::*;
 
+            // Reset
+            if cont1_key_edge & FaceStart as u16 != 0 {
+                unsafe { peripherals.CTRL.reset.write(|w| w.bits(1)); } // 1 resets entire SOC
+            }
+
             // Pause
             if !dead && cont1_key_edge & FaceSelect as u16 != 0 {
                 paused = !paused;
