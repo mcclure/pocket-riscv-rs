@@ -16,13 +16,13 @@ fn main() {
 
     {
         // Print a human-readable warning if the screen size is surprising.
-        use litex_pac::constants::{VIDEO_FRAMEBUFFER_HRES, VIDEO_FRAMEBUFFER_VRES};
-        const VIDEO_FRAMEBUFFER_HRES_EXPECTED: u32 = 266;
-        const VIDEO_FRAMEBUFFER_VRES_EXPECTED: u32 = 240;
-        if VIDEO_FRAMEBUFFER_HRES != VIDEO_FRAMEBUFFER_HRES_EXPECTED
-            || VIDEO_FRAMEBUFFER_VRES != VIDEO_FRAMEBUFFER_VRES_EXPECTED
+        use litex_pac::constants::{MAX_DISPLAY_WIDTH, MAX_DISPLAY_HEIGHT};
+        const MAX_DISPLAY_WIDTH_EXPECTED: u32 = 266;
+        const MAX_DISPLAY_HEIGHT_EXPECTED: u32 = 240;
+        if MAX_DISPLAY_WIDTH != MAX_DISPLAY_WIDTH_EXPECTED
+            || MAX_DISPLAY_HEIGHT != MAX_DISPLAY_HEIGHT_EXPECTED
         {
-            println!("cargo:warning=This app was designed for a screen of {VIDEO_FRAMEBUFFER_HRES_EXPECTED}x{VIDEO_FRAMEBUFFER_VRES_EXPECTED}. It is being compiled for a screen of {VIDEO_FRAMEBUFFER_HRES}x{VIDEO_FRAMEBUFFER_VRES}. Check to make sure it looks good (and if not, edit the \"App Properties\" constants in main.rs), then edit this warning in build.rs.");
+            println!("cargo:warning=This app was designed for a screen of {MAX_DISPLAY_WIDTH_EXPECTED}x{MAX_DISPLAY_HEIGHT_EXPECTED}. It is being compiled for a screen of {MAX_DISPLAY_WIDTH}x{MAX_DISPLAY_HEIGHT}. Check to make sure it looks good (and if not, edit the \"App Properties\" constants in main.rs), then edit this warning in build.rs.");
         }
     }
 
