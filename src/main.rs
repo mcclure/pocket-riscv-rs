@@ -58,8 +58,8 @@ static HEAP: Heap = Heap::empty();
 
 // Drawing support
 
-const DISPLAY_WIDTH: usize = 266;
-const DISPLAY_HEIGHT: usize = 240;
+const DISPLAY_WIDTH: usize = pac::constants::VIDEO_FRAMEBUFFER_HRES as usize;
+const DISPLAY_HEIGHT: usize = pac::constants::VIDEO_FRAMEBUFFER_VRES as usize;
 
 const READ_LENGTH: usize = 0x10000;
 

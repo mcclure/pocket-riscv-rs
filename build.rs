@@ -14,5 +14,17 @@ fn main() {
     println!("cargo:rerun-if-changed=memory.x");
     println!("cargo:rerun-if-changed=build.rs");
 
+    {
+        // Print a human-readable warning if the screen size is surprising.
+        use litex_pac::constants::{VIDEO_FRAMEBUFFER_HRES, VIDEO_FRAMEBUFFER_VRES};
+        const VIDEO_FRAMEBUFFER_HRES_EXPECTED: u32 = 266;
+        const VIDEO_FRAMEBUFFER_VRES_EXPECTED: u32 = 240;
+        if VIDEO_FRAMEBUFFER_HRES != VIDEO_FRAMEBUFFER_HRES_EXPECTED
+            || VIDEO_FRAMEBUFFER_VRES != VIDEO_FRAMEBUFFER_VRES_EXPECTED
+        {
+            println!("cargo:warning=This app was designed for a screen of {VIDEO_FRAMEBUFFER_HRES_EXPECTED}x{VIDEO_FRAMEBUFFER_VRES_EXPECTED}. It is being compiled for a screen of {VIDEO_FRAMEBUFFER_HRES}x{VIDEO_FRAMEBUFFER_VRES}. Check to make sure it looks good (and if not, edit the \"App Properties\" constants in main.rs), then edit this warning in build.rs.");
+        }
+    }
+
     // GOT SLINT? PUT IT HERE
 }
