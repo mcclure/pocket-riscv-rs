@@ -136,19 +136,8 @@ fn main() -> ! {
         let mut dead = false;
         let mut won = false;
         let mut cont1_key_last = 0; // State of controller on previous loop
-                                    // let mut first_frame = true;
 
         // Display
-
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "speed-debug")] { // State used to detect deadline misses
-                const SPEED_DEBUG_RATE:u32 = 1; // Every frame
-                let mut frame_already_overdue:bool = false;
-                let mut video_frame_counter_last:Option<u32> = None;
-                let mut missed_deadline_count:u32 = 0;
-                let mut missed_deadline_already = false;
-            }
-        }
 
         let screen = IRect2::new(
             IVec2::ZERO,
@@ -303,36 +292,8 @@ fn main() -> ! {
             // We'd like to do all drawing inside VBLANK to prevent tearing.
             loop {
                 let video = peripherals.APF_VIDEO.video.read();
-                let frame_ready = video.vblank_triggered().bit();
 
-                // Complex tracking to see if frames were skipped
-                cfg_if::cfg_if! {
-                    if #[cfg(feature = "speed-debug")] {
-                        let frame_ready = frame_ready || frame_already_overdue;
-                        if frame_ready {
-                            let video_frame_counter = video.frame_counter().bits();
-                            if let Some(video_frame_counter_last) = video_frame_counter_last {
-                                let gap = video_frame_counter as i32 - video_frame_counter_last as i32;
-                                if gap > 1 {
-                                    if 0== missed_deadline_count % SPEED_DEBUG_RATE {
-                                        println!("Too slow! Dropped an entire frame (frames missing {}; fail #{})", gap-1, missed_deadline_count);
-                                    }
-                                    missed_deadline_count += 1;
-                                } else {
-                                    if missed_deadline_already { missed_deadline_count += 1 }
-                                    if gap <= 0 {
-                                        println!("Catastrophic failure: Video counts no frames between frames (gap of {})", gap);
-                                    }
-                                }
-                            }
-                            video_frame_counter_last = Some(video_frame_counter);
-                            frame_already_overdue = false;
-                            missed_deadline_already = false;
-                        }
-                    }
-                }
-
-                if frame_ready {
+                if video.vblank_triggered().bit() {
                     break;
                 }
             }
@@ -528,22 +489,6 @@ fn main() -> ! {
                 }
             }
 
-            #[cfg(feature = "speed-debug")]
-            {
-                let video = peripherals.APF_VIDEO.video.read();
-                if !video.vblank_status().bit() {
-                    // Status has already gone low
-                    if 0 == missed_deadline_count % SPEED_DEBUG_RATE {
-                        println!(
-                            "Too slow! Drawing finished outside vblank deadline (fail #{})",
-                            missed_deadline_count
-                        );
-                    }
-                    missed_deadline_already = true;
-                }
-                frame_already_overdue = video.vblank_triggered().bit();
-            }
-
             // Audio generation
 
             // Generate enough samples to fill us up to our desired buffer (a frame plus a safety margin)
@@ -618,11 +563,6 @@ fn main() -> ! {
             }
 
             unsafe { peripherals.APF_AUDIO.playback_en.write(|w| w.bits(1)) };
-
-            // Uncomment if you need to know if you're on the first frame
-            // if (!paused) {
-            //     first_frame = false;
-            // }
         }
     }
 

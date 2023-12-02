@@ -1,4 +1,7 @@
 // 2D rectangle class/helper methods based on glam ivec2
+// Contributed by Andi McClure, available under Creative Commons Zero (public domain)
+// If you substantially reuse this code a credit would be appreciated but is not required
+
 // Notes:
 //    0,0 is top left
 //    For all rectangle classes, br is "non-inclusive":
@@ -97,50 +100,5 @@ impl IRect2 {
             return self.offset(IVec2::new(excess, 0));
         }
         self.clone()
-    }
-}
-
-// Unit tests
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn range_intersection() {
-        let rect = IRect2::new(IVec2::new(5, 5), IVec2::new(15, 15));
-        for y in 0..3 {
-            for x in 0..3 {
-                let v = IVec2::new(x * 10, y * 10);
-                assert_eq!(
-                    rect.within(v),
-                    (x == 1 && y == 1),
-                    "Incorrect within! rect: {:?} v: {:?}",
-                    rect,
-                    v
-                );
-                let r2 = IRect2::new_centered(v, IVec2::ONE * 2);
-                assert_eq!(
-                    rect.enclose(r2),
-                    (x == 1 && y == 1),
-                    "Incorrect enclose! rect: {:?} v: {:?}",
-                    rect,
-                    r2
-                );
-            }
-        }
-        for y in 0..5 {
-            for x in 0..5 {
-                let v = IVec2::new(x * 5, y * 5);
-                let r2 = IRect2::new_centered(v, IVec2::ONE * 2);
-                assert_eq!(
-                    rect.intersect(r2),
-                    !(x == 0 || x == 4 || y == 0 || y == 4),
-                    "Incorrect intersect! rect: {:?} v: {:?}",
-                    rect,
-                    r2
-                );
-            }
-        }
     }
 }

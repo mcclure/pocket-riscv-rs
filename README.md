@@ -4,6 +4,8 @@ The code in this commit is a small brick breaking game ("minibreak") that shows 
 
 If you wish to fork this, make sure to change the app name in Cargo.toml (it gets built into the application) and the license below (assuming do not wish to release as public domain). You may also prefer to remove the app-specific dependency "glam".
 
+This particular branch of this repo represents minibreak as formatted to upstream to agg23's repo as sample code. I removed dead code and unit tests and ran rustfmt. (I have some differences of opinion with rustfmt.)
+
 # Usage
 
 See [run.txt](run.txt)
