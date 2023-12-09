@@ -13,33 +13,13 @@ use litex_pac as pac;
 use litex_openfpga::*;
 use riscv_rt::entry;
 
+
+// Basic platform support
+
 // Definition is required for uart_printer.rs to work
 hal::uart! {
     UART: pac::UART,
 }
-
-#[repr(u16)]
-#[allow(dead_code)]
-enum PocketControls {
-    DpadUp     = 1<<0,
-    DpadDown   = 1<<1,
-    DpadLeft   = 1<<2,
-    DpadRight  = 1<<3,
-    FaceA      = 1<<4,
-    FaceB      = 1<<5,
-    FaceX      = 1<<6,
-    FaceY      = 1<<7,
-    TrigL1     = 1<<8,
-    TrigR1     = 1<<9,
-    TrigL2     = 1<<10,
-    TrigR2     = 1<<11,
-    TrigL3     = 1<<12,
-    TrigR3     = 1<<13,
-    FaceSelect = 1<<14,
-    FaceStart  = 1<<15,
-}
-
-// const TEST_ADDR: *mut u32 = (0xF0001800 + 0x0028) as *mut u32;
 
 // Fix for missing main functions
 #[no_mangle]
@@ -76,8 +56,10 @@ fn panic(info: &PanicInfo) -> ! {
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
 
-const DISPLAY_WIDTH: usize = 266;
-const DISPLAY_HEIGHT: usize = 240;
+// Drawing support
+
+const DISPLAY_WIDTH: usize = pac::constants::MAX_DISPLAY_WIDTH as usize;
+const DISPLAY_HEIGHT: usize = pac::constants::MAX_DISPLAY_HEIGHT as usize;
 
 const READ_LENGTH: usize = 0x10000;
 
@@ -94,6 +76,29 @@ fn pixel(framebuffer_address: *mut u16, x: usize, y: usize) -> &'static mut u16 
     let framebuffer = unsafe { from_raw_parts_mut(framebuffer_address as *mut u16, READ_LENGTH) };
 
     &mut framebuffer[y * DISPLAY_WIDTH + x]
+}
+
+// Gamepad controls
+
+#[repr(u16)]
+#[allow(dead_code)]
+enum PocketControls {
+    DpadUp     = 1<<0,
+    DpadDown   = 1<<1,
+    DpadLeft   = 1<<2,
+    DpadRight  = 1<<3,
+    FaceA      = 1<<4,
+    FaceB      = 1<<5,
+    FaceX      = 1<<6,
+    FaceY      = 1<<7,
+    TrigL1     = 1<<8,
+    TrigR1     = 1<<9,
+    TrigL2     = 1<<10,
+    TrigR2     = 1<<11,
+    TrigL3     = 1<<12,
+    TrigR3     = 1<<13,
+    FaceSelect = 1<<14,
+    FaceStart  = 1<<15,
 }
 
 // This is the entry point for the application.
@@ -123,18 +128,57 @@ fn main() -> ! {
         let mut paused = false;
         let mut cont1_key_last = 0;
 
-        #[cfg(feature = "speed-debug")]
-        let mut missed_deadline = 0;
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "speed-debug")] { // State used to detect deadline misses
+                const SPEED_DEBUG_RATE:u32 = 1; // Every frame
+                let mut frame_already_overdue:bool = false;
+                let mut video_frame_counter_last:Option<u32> = None;
+                let mut missed_deadline_count:u32 = 0;
+                let mut missed_deadline_already = false;
+            }
+        }
 
         // Remember: Vsync occurs slightly after vblank, so vblank tells us when it's safe to draw
-        // and vsync tells us when we missed a frame. For this test app, we'll begin by waiting for
-        // one complete frame to pass us by, suboptimal in a real app but okay here:
-        while 0 == peripherals.APF_VIDEO.vsync_status.read().bits() {}
-        while 0 != peripherals.APF_VIDEO.vblank_status.read().bits() {}
+        // and vsync tells us when we missed a frame. For this test app, we'll begin by clearing
+        // vblank_triggered, forcing one complete frame to pass us by.
+        // This would be suboptimal in a real app but is okay here:
+        let _ = peripherals.APF_VIDEO.video.read();
 
         loop {
-            // Wait for post-frame blank
-            while 0 == peripherals.APF_VIDEO.vblank_status.read().bits() {}
+            // Busy loop until VBLANK begins, signaling next frame ready to go.
+        	loop {
+                let video = peripherals.APF_VIDEO.video.read();
+                let frame_ready = video.vblank_triggered().bit();
+
+                // Complex tracking to see if frames were skipped
+                cfg_if::cfg_if! {
+                    if #[cfg(feature = "speed-debug")] {
+                        let frame_ready = frame_ready || frame_already_overdue;
+                        if frame_ready {
+                            let video_frame_counter = video.frame_counter().bits();
+                            if let Some(video_frame_counter_last) = video_frame_counter_last {
+                                let gap = video_frame_counter as i32 - video_frame_counter_last as i32;
+                                if gap > 1 {
+                                    if 0== missed_deadline_count % SPEED_DEBUG_RATE {
+                                        println!("Too slow! Dropped an entire frame (frames missing {}; fail #{})", gap-1, missed_deadline_count);
+                                    }
+                                    missed_deadline_count += 1;
+                                } else {
+                                    if missed_deadline_already { missed_deadline_count += 1 } // We noticed a miss but haven't recorded it
+                                    if gap <= 0 {
+                                        println!("Catastrophic failure: Video counts no frames between frames (gap of {})", gap);
+                                    }
+                                }
+                            }
+                            video_frame_counter_last = Some(video_frame_counter);
+                            frame_already_overdue = false;
+                            missed_deadline_already = false;
+                        }
+                    }
+                }
+
+                if frame_ready { break; }
+            }
 
             // Controls
             let cont1_key = peripherals.APF_INPUT.cont1_key.read().bits() as u16; // Crop out analog sticks
@@ -147,6 +191,12 @@ fn main() -> ! {
             if cont1_key_edge & FaceSelect as u16 != 0 {
                 paused = !paused;
             }
+
+            let flicker_width:usize = DISPLAY_WIDTH / (if cont1_key & DpadLeft as u16 != 0 { 16 }
+                else if cont1_key & DpadUp as u16 != 0 { 8 }
+                else if cont1_key & DpadRight as u16 != 0 { 4 }
+                else if cont1_key & DpadDown as u16 != 0 { 2 }
+                else { 1 });
 
             let flicker_freq:u8 = if cont1_key & FaceB as u16 != 0 { 0b1 }
                 else if cont1_key & FaceA as u16 != 0 { 0b10 }
@@ -176,15 +226,21 @@ fn main() -> ! {
             let color_gray:u16 = gray_to_565(color_gray);
 
             for y in 0..DISPLAY_HEIGHT {
-                for x in 0..DISPLAY_WIDTH {
+                for x in 0..flicker_width {
                      *pixel(fb, x, y) = color_gray;
                 }
             }
 
             #[cfg(feature = "speed-debug")]
-            if 0 == peripherals.APF_VIDEO.vblank_status.read().bits() {
-                missed_deadline += 1;
-                println!("Too slow! Drawing exceeded vblank deadline #{}", missed_deadline);
+            {
+                let video = peripherals.APF_VIDEO.video.read();
+                if !video.vblank_status().bit() { // Status has already gone low
+                    if 0== missed_deadline_count % SPEED_DEBUG_RATE {
+                        println!("Too slow! Drawing finished outside vblank deadline (fail #{})", missed_deadline_count);
+                    }
+                    missed_deadline_already = true;
+                }
+                frame_already_overdue = video.vblank_triggered().bit();
             }
 
             let audio_needed = AUDIO_TARGET - peripherals.APF_AUDIO.buffer_fill.read().bits() as i32;
