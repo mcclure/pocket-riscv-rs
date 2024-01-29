@@ -87,8 +87,7 @@ enum PocketControls {
 
 // This is the entry point for the application.
 // It is not allowed to return.
-#[cfg(not(test))]
-#[entry]
+#[cfg_attr(not(test), entry)] // FIXME: Retest this after Cargo issue #13146 addressed
 fn main() -> ! {
     use alloc::boxed::Box;
 
@@ -104,7 +103,7 @@ fn main() -> ! {
     const DISPLAY_LEN:usize = DISPLAY_HEIGHT*DISPLAY_WIDTH;
     let mut screens = [Box::new([0 as u16; DISPLAY_LEN]), Box::new([0 as u16; DISPLAY_LEN])];
     let mut screen_current = 0; // First frame or two will be pretty nonsense
-    
+
 //    render_init(fb);
 
     // "APP"
@@ -227,9 +226,11 @@ fn main() -> ! {
 
             let screen = &mut* screens[screen_current];
 
+            let background = if (screen_current == 0) { 0 } else { 0xFFFF };
             for y in 0..DISPLAY_HEIGHT {
                 for x in 0..DISPLAY_WIDTH {
-                    screen[y * DISPLAY_WIDTH + x] = if (screen_current == 0) { 0 } else { 0xFFFF };
+
+                    screen[y * DISPLAY_WIDTH + x] = background
                 }
             }
 
