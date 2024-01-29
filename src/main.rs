@@ -43,7 +43,7 @@ fn fmaxf(a: f32, b: f32) -> f32 {
 
 use core::mem::MaybeUninit;
 
-const HEAP_SIZE: usize = 200 * 1024;
+const HEAP_SIZE: usize = 1024 * 1024;
 static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
 
 #[panic_handler]
