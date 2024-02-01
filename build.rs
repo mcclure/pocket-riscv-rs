@@ -1,5 +1,25 @@
 use std::path::Path;
 
+use rgb565::Rgb565;
+
+use rkyv::{Archive, Serialize};
+
+#[derive(/*Archive, Deserialize*/, Serialize, Debug, PartialEq)]
+#[archive(
+    // This will generate a PartialEq impl between our unarchived and archived
+    // types:
+    compare(PartialEq),
+    // bytecheck can be used to validate your data if you want. To use the safe
+    // API, you have to derive CheckBytes for the archived type:
+    check_bytes,
+)]
+// Derives can be passed through to the generated type:
+#[archive_attr(derive(Debug))]
+struct RawImage {
+    w:u16, h:u16,
+    pixels: Vec<u16>,
+}
+
 /// Put the linker script somewhere the linker can find it.
 fn main() {
     let dest_path = Path::new("external/openfpga-litex/lang/linker");
@@ -27,4 +47,14 @@ fn main() {
     }
 
     // GOT SLINT? PUT IT HERE
+
+    // Asset loads
+    let im = image::open(Path::new("resource/playfield_bg.png")).unwrap();
+    let im_buf: image::ImageBuffer<image::Rgb<u8>, Vec<u8>> = im.into();
+    let mut pix:Vec<u16> = Default::default();
+    for (_x, _y, pixel) in im_buf.enumerate_pixels() {
+        let image::Rgb([r,g,b]) = *pixel;
+        let packed = Rgb565::from_rgb888_components(r, g, b).to_rgb565();
+        pix.push(packed);
+    }
 }
