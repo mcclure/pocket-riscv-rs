@@ -108,7 +108,7 @@ fn main() -> ! {
 
     // "APP"
     {
-//        use alloc::vec::Vec;
+        use alloc::vec::Vec;
         use glam::IVec2;
         use crate::irect2::*;
 
@@ -155,6 +155,16 @@ fn main() -> ! {
         let playfield = RawImage { w:256, h:192, pixels: include_bytes!(concat!(env!("OUT_DIR"), "/playfield_bg.bin")) as *const u8 as _ };
         let playfield_size = IVec2::new(playfield.w as i32, playfield.h as i32);
         let playfield_basis = (display - playfield_size) / 2;
+
+        let witch = RawImage { w:30, h:30, pixels: include_bytes!(concat!(env!("OUT_DIR"), "/player_hit.bin")) as *const u8 as _ };
+        let blobber = RawImage { w:34, h:34, pixels: include_bytes!(concat!(env!("OUT_DIR"), "/blobber_attack.bin")) as *const u8 as _ };
+
+        let sprite_data = [witch, blobber];
+
+        let mut sprites: Vec<(usize, IVec2, bool)> = Default::default();
+
+        sprites.push((1, IVec2::ZERO, false));
+        sprites.push((0, display/2, false));
 
         loop {
             // Busy loop until VBLANK begins, signaling next frame ready to go.
@@ -259,6 +269,26 @@ fn main() -> ! {
                         } else {
                              background
                         }
+                }
+            }
+            for &mut (sprite_idx, at, reversed) in sprites.iter_mut() {
+                let sprite = &sprite_data[sprite_idx];
+                for y in 0..sprite.h {
+                    for x in 0..sprite.w {
+                        let pix_at = at + IVec2::new(x as i32, y as i32);
+                        if (ivec2_within(display, pix_at)) {
+                            unsafe {
+                                screen[pix_at.y as usize * DISPLAY_WIDTH + pix_at.x as usize] =
+                                    // WARNING: u16 MATH COULD OVERFLOW 
+                                    *sprite.pixels.wrapping_add((y * sprite.w + x) as usize)
+                            }
+                        }
+                    }
+                }
+                if reversed {
+
+                } else {
+
                 }
             }
 

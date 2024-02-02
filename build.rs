@@ -31,12 +31,16 @@ fn main() {
     // GOT SLINT? PUT IT HERE
 
     // Asset loads
-    {
-        const FILENAME:&str = "resource/playfield_bg.png";
-        println!("cargo:rerun-if-changed={}", FILENAME);
-        let im = image::open(Path::new(FILENAME)).unwrap();
+    const FILES: [[&str;2];3] = [
+        ["resource/playfield_bg.png", "playfield_bg.bin"],
+        ["resource/little witch/player_hit_s_0000.png", "player_hit.bin"],
+        ["resource/blobber/blobber_attackbase_0000.png", "blobber_attack.bin"]
+    ];
+    for [src_name, dst_name] in FILES {
+        println!("cargo:rerun-if-changed={}", src_name);
+        let im = image::open(Path::new(src_name)).unwrap();
         let im_buf: image::ImageBuffer<image::Rgb<u8>, Vec<u8>> = im.into();
-        let mut file = std::fs::File::create(Path::new(&std::env::var("OUT_DIR").unwrap()).join("playfield_bg.bin")).unwrap();
+        let mut file = std::fs::File::create(Path::new(&std::env::var("OUT_DIR").unwrap()).join(dst_name)).unwrap();
         for (_x, _y, pixel) in im_buf.enumerate_pixels() {
             let image::Rgb([r,g,b]) = *pixel;
             let packed = Rgb565::from_rgb888_components(r, g, b).to_rgb565();
