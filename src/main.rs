@@ -130,6 +130,7 @@ fn main() -> ! {
                 let mut video_frame_counter_last:Option<u32> = None;
                 let mut missed_deadline_count:u32 = 0;
                 let mut missed_deadline_already = false;
+                let mut frame_deadline_state;
             }
         }
 
@@ -166,18 +167,23 @@ fn main() -> ! {
                 cfg_if::cfg_if! {
                     if #[cfg(feature = "speed-debug")] {
                         let frame_ready = frame_ready || frame_already_overdue;
+                        frame_deadline_state = 0;
                         if frame_ready {
                             let video_frame_counter = video.frame_counter().bits();
                             if let Some(video_frame_counter_last) = video_frame_counter_last {
                                 let gap = video_frame_counter as i32 - video_frame_counter_last as i32;
                                 if gap > 1 {
                                     if 0== missed_deadline_count % SPEED_DEBUG_RATE {
+                                        frame_deadline_state = 2;
+                                        #[cfg(feature = "speed-debug-serial")]
                                         println!("Too slow! Dropped an entire frame (frames missing {}; fail #{})", gap-1, missed_deadline_count);
                                     }
                                     missed_deadline_count += 1;
                                 } else {
                                     if missed_deadline_already { missed_deadline_count += 1 }
                                     if gap <= 0 {
+                                        frame_deadline_state = 1;
+                                        #[cfg(feature = "speed-debug-serial")]
                                         println!("Catastrophic failure: Video counts no frames between frames (gap of {})", gap);
                                     }
                                 }
@@ -235,7 +241,13 @@ fn main() -> ! {
 
             let screen = &mut* screens[screen_current];
 
-            let background = if (screen_current == 0) { 0 } else { 0xFFFF };
+            let background = 0;
+            #[cfg(feature = "speed-debug")]
+            let background = match frame_deadline_state {
+                1 => 0x6800,
+                2 => 0xF800,
+                _ => background
+            };
             for y in 0..DISPLAY_HEIGHT {
                 for x in 0..DISPLAY_WIDTH {
                     let at = IVec2::new(x as i32, y as i32) - playfield_basis;

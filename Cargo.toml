@@ -7,6 +7,7 @@ edition = "2021"
 
 [features]
 speed-debug = []
+speed-debug-serial = []
 
 [build-dependencies]
 litex-pac = { path = "external/openfpga-litex/lang/rust/crates/litex-pac", features = ["rt"] }
