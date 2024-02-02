@@ -12,7 +12,6 @@ speed-debug = []
 litex-pac = { path = "external/openfpga-litex/lang/rust/crates/litex-pac", features = ["rt"] }
 image = { version = "0.24.6", features = ["png"], default-features = false }
 rgb565 = "0.1.3"
-rkyv = "0.7.43"
 # slint-build = "1.2.2"
 
 [dependencies]
@@ -27,5 +26,3 @@ riscv-rt = "0.11.0"
 num-traits = { version = "0.2.17", default-features = false }
 glam = { version = "0.24.2", default-features = false, features = ["libm", "fast-math"] }
 cfg-if = "1.0.0"
-rkyv = { version = "0.7.43", default-features = false, features = ["alloc", "size_32"] }
-

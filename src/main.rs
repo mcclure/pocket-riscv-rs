@@ -109,8 +109,8 @@ fn main() -> ! {
     // "APP"
     {
 //        use alloc::vec::Vec;
-//        use glam::IVec2;
-//        use crate::irect2::*;
+        use glam::IVec2;
+        use crate::irect2::*;
 
         // Top-level config
 
@@ -133,7 +133,7 @@ fn main() -> ! {
             }
         }
 
-//        let screen = IRect2::new(IVec2::ZERO, IVec2::new(DISPLAY_WIDTH as i32, DISPLAY_HEIGHT as i32));
+        let display = IVec2::new(DISPLAY_WIDTH as i32, DISPLAY_HEIGHT as i32);
 
         // Audio properties
 
@@ -145,6 +145,15 @@ fn main() -> ! {
         // Game properties
 
         // Game state
+
+        struct RawImage {
+            w:u16, h:u16,
+            pixels: *const u16,
+        }
+
+        let playfield = RawImage { w:256, h:192, pixels: include_bytes!(concat!(env!("OUT_DIR"), "/playfield_bg.bin")) as *const u8 as _ };
+        let playfield_size = IVec2::new(playfield.w as i32, playfield.h as i32);
+        let playfield_basis = (display - playfield_size) / 2;
 
         loop {
             // Busy loop until VBLANK begins, signaling next frame ready to go.
@@ -229,8 +238,15 @@ fn main() -> ! {
             let background = if (screen_current == 0) { 0 } else { 0xFFFF };
             for y in 0..DISPLAY_HEIGHT {
                 for x in 0..DISPLAY_WIDTH {
-
-                    screen[y * DISPLAY_WIDTH + x] = background
+                    let at = IVec2::new(x as i32, y as i32) - playfield_basis;
+                    screen[y * DISPLAY_WIDTH + x] =
+                        if (ivec2_within(playfield_size, at)) {
+                            unsafe {
+                                *playfield.pixels.wrapping_add((at.y * playfield_size.x + at.x) as usize)
+                            }
+                        } else {
+                             background
+                        }
                 }
             }
 
