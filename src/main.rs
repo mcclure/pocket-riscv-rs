@@ -271,11 +271,11 @@ fn main() -> ! {
                         }
                 }
             }
-            for &mut (sprite_idx, at, reversed) in sprites.iter_mut() {
-                let sprite = &sprite_data[sprite_idx];
+            for (sprite_idx, at, reversed) in sprites.iter_mut() {
+                let sprite = &sprite_data[*sprite_idx];
                 for y in 0..sprite.h {
                     for x in 0..sprite.w {
-                        let pix_at = at + IVec2::new(x as i32, y as i32);
+                        let pix_at = *at + IVec2::new(x as i32, y as i32);
                         if (ivec2_within(display, pix_at)) {
                             unsafe {
                                 screen[pix_at.y as usize * DISPLAY_WIDTH + pix_at.x as usize] =
@@ -285,10 +285,23 @@ fn main() -> ! {
                         }
                     }
                 }
-                if reversed {
-
+                let mut flip = false;
+                if *reversed {
+                    *at += IVec2::new(-1, if at.x%2==0 { 1 } else { 0 });
+                    if at.x <= 0 {
+                        flip = true;
+                    }
                 } else {
-
+                    *at += IVec2::new(1, 0);
+                    if at.x + sprite.w as i32 >= DISPLAY_WIDTH as i32 {
+                        flip = true;
+                    }
+                }
+                if (flip) {
+                    *reversed = !*reversed;
+                    if at.y + sprite.h as i32 >= DISPLAY_HEIGHT as i32 {
+                        *at = IVec2::ZERO;
+                    }
                 }
             }
 
