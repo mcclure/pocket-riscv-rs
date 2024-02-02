@@ -273,14 +273,15 @@ fn main() -> ! {
             }
             for (sprite_idx, at, reversed) in sprites.iter_mut() {
                 let sprite = &sprite_data[*sprite_idx];
+                let transparent = unsafe { *sprite.pixels };
                 for y in 0..sprite.h {
                     for x in 0..sprite.w {
                         let pix_at = *at + IVec2::new(x as i32, y as i32);
                         if (ivec2_within(display, pix_at)) {
-                            unsafe {
-                                screen[pix_at.y as usize * DISPLAY_WIDTH + pix_at.x as usize] =
-                                    // WARNING: u16 MATH COULD OVERFLOW 
-                                    *sprite.pixels.wrapping_add((y * sprite.w + x) as usize)
+                            // WARNING: u16 MATH COULD OVERFLOW
+                            let color = unsafe { *sprite.pixels.wrapping_add((y * sprite.w + x) as usize) };
+                            if (color != transparent) {
+                                screen[pix_at.y as usize * DISPLAY_WIDTH + pix_at.x as usize] = color;
                             }
                         }
                     }
