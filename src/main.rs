@@ -161,10 +161,10 @@ fn main() -> ! {
 
         let sprite_data = [witch, blobber];
 
-        let mut sprites: Vec<(usize, IVec2, bool)> = Default::default();
+        let mut sprites: Vec<(usize, IVec2, bool, bool)> = Default::default();
 
-        sprites.push((1, IVec2::ZERO, false));
-        sprites.push((0, display/2, false));
+        sprites.push((1, IVec2::ZERO, false, false)); // idx, location, reversed, flippable
+        sprites.push((0, display/2, false, true));
 
         loop {
             // Busy loop until VBLANK begins, signaling next frame ready to go.
@@ -271,7 +271,7 @@ fn main() -> ! {
                         }
                 }
             }
-            for (sprite_idx, at, reversed) in sprites.iter_mut() {
+            for (sprite_idx, at, reversed, flippable) in sprites.iter_mut() {
                 let sprite = &sprite_data[*sprite_idx];
                 let transparent = unsafe { *sprite.pixels };
                 for y in 0..sprite.h {
@@ -279,7 +279,7 @@ fn main() -> ! {
                         let pix_at = *at + IVec2::new(x as i32, y as i32);
                         if (ivec2_within(display, pix_at)) {
                             // WARNING: u16 MATH COULD OVERFLOW
-                            let color = unsafe { *sprite.pixels.wrapping_add((y * sprite.w + x) as usize) };
+                            let color = unsafe { *sprite.pixels.wrapping_add((y * sprite.w + if *reversed && *flippable { sprite.w - x - 1 } else { x } ) as usize) };
                             if (color != transparent) {
                                 screen[pix_at.y as usize * DISPLAY_WIDTH + pix_at.x as usize] = color;
                             }
