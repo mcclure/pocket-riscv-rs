@@ -102,7 +102,7 @@ fn main() -> ! {
     // Note we also had the option of simply picking an address and writing dma_base instead of reading it
     const DISPLAY_LEN:usize = DISPLAY_HEIGHT*DISPLAY_WIDTH;
     let mut screens = [Box::new([0 as u16; DISPLAY_LEN]), Box::new([0 as u16; DISPLAY_LEN])];
-    let mut screens_dirty = [true, true];
+    let mut fullscreen_dirty = [true, true];
     let mut screen_current = 0; // First frame or two will be pretty nonsense
 
 //    render_init(fb);
@@ -132,6 +132,8 @@ fn main() -> ! {
                 let mut missed_deadline_count:u32 = 0;
                 let mut missed_deadline_already = false;
                 let mut frame_deadline_state;
+                let mut frame_deadline_state_was = [0,0]; // Initial values will be unread
+                let mut frame_deadline_state_changed = false; // Initial value will be unread
             }
         }
 
@@ -181,6 +183,13 @@ fn main() -> ! {
 
         let sprite_data = [witch, blobber];
 
+        #[cfg(feature = "speed-debug")]
+        let speed_debug_rect = {
+            let margin = playfield_basis.y/3;
+            let ul = IVec2::new(0, margin*4 + playfield_size.y);
+            IRect2::new(ul, ul + IVec2::new(DISPLAY_WIDTH as i32, margin))
+        };
+
         let mut sprites: Vec<Sprite> = Default::default();
 
         sprites.push(Sprite::new(1, IVec2::ZERO, false)); // idx, location, reversed, flippable
@@ -223,6 +232,10 @@ fn main() -> ! {
                             video_frame_counter_last = Some(video_frame_counter);
                             frame_already_overdue = false;
                             missed_deadline_already = false;
+
+                            // For speed debug rectangle 
+                            frame_deadline_state_changed = frame_deadline_state != frame_deadline_state_was[screen_current];
+                            frame_deadline_state_was[screen_current] = frame_deadline_state;
                         }
                     }
                 }
@@ -274,28 +287,34 @@ fn main() -> ! {
             let screen = &mut* screens[screen_current];
 
             // Clear dirty rectangles
-            if screens_dirty[screen_current] { // First pass full-screen draw
+            if fullscreen_dirty[screen_current] { // First pass full-screen draw
                 dirty_temp.push(display_rect);
-                screens_dirty[screen_current] = false;
-            } else if (!paused) {
-                for Sprite {idx:sprite_idx, dirty, ..} in sprites.iter() {
-                    if let Some(at) = dirty[screen_current] {
-                        let size = {
-                            let sprite = &sprite_data[*sprite_idx];
-                            IVec2::new(sprite.w as i32, sprite.h as i32)
-                        };
-                        let rect = display_rect.overlap(IRect2::new(at, at+size));
-                        if let Some(rect) = rect {
-                            dirty_temp.push(rect);
+                fullscreen_dirty[screen_current] = false;
+            } else {
+                if (!paused) {
+                    for Sprite {idx:sprite_idx, dirty, ..} in sprites.iter() {
+                        if let Some(at) = dirty[screen_current] {
+                            let size = {
+                                let sprite = &sprite_data[*sprite_idx];
+                                IVec2::new(sprite.w as i32, sprite.h as i32)
+                            };
+                            let rect = display_rect.overlap(IRect2::new(at, at+size));
+                            if let Some(rect) = rect {
+                                dirty_temp.push(rect);
+                            }
+                            // Assume if we're already drawing, we DON'T need to clear dirty-- it will clear soon
                         }
-                        // Assume if we're already drawing, we DON'T need to clear dirty-- it will clear soon
                     }
+                }
+                #[cfg(feature = "speed-debug")] // Note if this coincides with pause it will act weird. For debug code that's ok
+                if frame_deadline_state_changed {
+                    dirty_temp.push(speed_debug_rect);
                 }
             }
             for rect in dirty_temp.iter() {
                 let background = 0;
                 #[cfg(feature = "speed-debug")]
-                let background = match frame_deadline_state {
+                let speed_debug_background = match frame_deadline_state {
                     1 => 0x6800,
                     2 => 0xF800,
                     _ => background
@@ -309,7 +328,9 @@ fn main() -> ! {
                                     *playfield.pixels.wrapping_add((at.y * playfield_size.x + at.x) as usize)
                                 }
                             } else {
-                                 background
+                                #[cfg(feature = "speed-debug")]
+                                let background = if speed_debug_background != background && speed_debug_rect.within(IVec2::new(x as i32, y as i32)) { speed_debug_background } else { background };
+                                background
                             }
                     }
                 }
@@ -352,6 +373,9 @@ fn main() -> ! {
                         if at.y + sprite.h as i32 >= DISPLAY_HEIGHT as i32 {
                             *at = IVec2::ZERO;
                             audio_pitch_mod = 1;
+
+                            // Uncomment this next line to test the speed test rectangle. Yes, this is silly
+                            // for _ in 1..1000000 { audio_pitch_mod *= 3 }
                         } else {
                             audio_pitch_mod = 2;
                         }
@@ -390,7 +414,7 @@ fn main() -> ! {
 
             // Late mechanics
 
-            // Controls: Pause
+            // Controls: Pause // TODO move check earlier
             if !dead && cont1_key_edge & FaceSelect as u16 != 0 {
                 paused = !paused;
             }
