@@ -102,6 +102,7 @@ fn main() -> ! {
     // Note we also had the option of simply picking an address and writing dma_base instead of reading it
     const DISPLAY_LEN:usize = DISPLAY_HEIGHT*DISPLAY_WIDTH;
     let mut screens = [Box::new([0 as u16; DISPLAY_LEN]), Box::new([0 as u16; DISPLAY_LEN])];
+    let mut screens_dirty = [true, true];
     let mut screen_current = 0; // First frame or two will be pretty nonsense
 
 //    render_init(fb);
@@ -135,6 +136,7 @@ fn main() -> ! {
         }
 
         let display = IVec2::new(DISPLAY_WIDTH as i32, DISPLAY_HEIGHT as i32);
+        let display_rect = IRect2::new(IVec2::ZERO, display);
 
         // Audio properties
 
@@ -150,21 +152,33 @@ fn main() -> ! {
         struct RawImage {
             w:u16, h:u16,
             pixels: *const u16,
+            flippable: bool
         }
 
-        let playfield = RawImage { w:256, h:192, pixels: include_bytes!(concat!(env!("OUT_DIR"), "/playfield_bg.bin")) as *const u8 as _ };
+        struct Sprite {
+            idx:usize, at:IVec2, reversed:bool, dirty:[Option<IVec2>;2] 
+        }
+        impl Sprite {
+            pub fn new(idx:usize, at:IVec2, reversed:bool) -> Sprite {
+                Sprite { idx, at, reversed, dirty:[None, None] }
+            }
+        }
+
+        let playfield = RawImage { w:256, h:192, flippable:false, pixels: include_bytes!(concat!(env!("OUT_DIR"), "/playfield_bg.bin")) as *const u8 as _ };
         let playfield_size = IVec2::new(playfield.w as i32, playfield.h as i32);
         let playfield_basis = (display - playfield_size) / 2;
 
-        let witch = RawImage { w:30, h:30, pixels: include_bytes!(concat!(env!("OUT_DIR"), "/player_hit.bin")) as *const u8 as _ };
-        let blobber = RawImage { w:34, h:34, pixels: include_bytes!(concat!(env!("OUT_DIR"), "/blobber_attack.bin")) as *const u8 as _ };
+        let witch = RawImage { w:30, h:30, flippable: true, pixels: include_bytes!(concat!(env!("OUT_DIR"), "/player_hit.bin")) as *const u8 as _ };
+        let blobber = RawImage { w:34, h:34, flippable: false, pixels: include_bytes!(concat!(env!("OUT_DIR"), "/blobber_attack.bin")) as *const u8 as _ };
 
         let sprite_data = [witch, blobber];
 
-        let mut sprites: Vec<(usize, IVec2, bool, bool)> = Default::default();
+        let mut sprites: Vec<Sprite> = Default::default();
 
-        sprites.push((1, IVec2::ZERO, false, false)); // idx, location, reversed, flippable
-        sprites.push((0, display/2, false, true));
+        sprites.push(Sprite::new(1, IVec2::ZERO, false)); // idx, location, reversed, flippable
+        sprites.push(Sprite::new(0, display/2, false));
+
+        let mut dirty_temp:Vec<IRect2> = Default::default();
 
         loop {
             // Busy loop until VBLANK begins, signaling next frame ready to go.
@@ -251,27 +265,51 @@ fn main() -> ! {
 
             let screen = &mut* screens[screen_current];
 
-            let background = 0;
-            #[cfg(feature = "speed-debug")]
-            let background = match frame_deadline_state {
-                1 => 0x6800,
-                2 => 0xF800,
-                _ => background
-            };
-            for y in 0..DISPLAY_HEIGHT {
-                for x in 0..DISPLAY_WIDTH {
-                    let at = IVec2::new(x as i32, y as i32) - playfield_basis;
-                    screen[y * DISPLAY_WIDTH + x] =
-                        if (ivec2_within(playfield_size, at)) {
-                            unsafe {
-                                *playfield.pixels.wrapping_add((at.y * playfield_size.x + at.x) as usize)
-                            }
-                        } else {
-                             background
+            // Clear dirty rectangles
+            if screens_dirty[screen_current] { // First pass full-screen draw
+                dirty_temp.push(display_rect);
+                screens_dirty[screen_current] = false;
+            } else {
+                for Sprite {idx:sprite_idx, dirty, ..} in sprites.iter() {
+                    if let Some(at) = dirty[screen_current] {
+                        let size = {
+                            let sprite = &sprite_data[*sprite_idx];
+                            IVec2::new(sprite.w as i32, sprite.h as i32)
+                        };
+                        let rect = display_rect.overlap(IRect2::new(at, at+size));
+                        if let Some(rect) = rect {
+                            dirty_temp.push(rect);
                         }
+                        // Assume if we're already drawing, we DON'T need to clear dirty-- it will clear soon
+                    }
                 }
             }
-            for (sprite_idx, at, reversed, flippable) in sprites.iter_mut() {
+            for rect in dirty_temp.iter() {
+                let background = 0;
+                #[cfg(feature = "speed-debug")]
+                let background = match frame_deadline_state {
+                    1 => 0x6800,
+                    2 => 0xF800,
+                    _ => background
+                };
+                for y in rect.ul.y..rect.br.y {
+                    for x in rect.ul.x..rect.br.x {
+                        let at = IVec2::new(x, y) - playfield_basis;
+                        screen[y as usize * DISPLAY_WIDTH + x as usize] =
+                            if (ivec2_within(playfield_size, at)) {
+                                unsafe {
+                                    *playfield.pixels.wrapping_add((at.y * playfield_size.x + at.x) as usize)
+                                }
+                            } else {
+                                 background
+                            }
+                    }
+                }
+            }
+            dirty_temp.clear(); // Reuse one vector so we're not reallocating
+
+            // Draw sprites
+            for Sprite {idx: sprite_idx, at, reversed, dirty} in sprites.iter_mut() {
                 let sprite = &sprite_data[*sprite_idx];
                 let transparent = unsafe { *sprite.pixels };
                 for y in 0..sprite.h {
@@ -279,13 +317,14 @@ fn main() -> ! {
                         let pix_at = *at + IVec2::new(x as i32, y as i32);
                         if (ivec2_within(display, pix_at)) {
                             // WARNING: u16 MATH COULD OVERFLOW
-                            let color = unsafe { *sprite.pixels.wrapping_add((y * sprite.w + if *reversed && *flippable { sprite.w - x - 1 } else { x } ) as usize) };
+                            let color = unsafe { *sprite.pixels.wrapping_add((y * sprite.w + if *reversed && sprite.flippable { sprite.w - x - 1 } else { x } ) as usize) };
                             if (color != transparent) {
                                 screen[pix_at.y as usize * DISPLAY_WIDTH + pix_at.x as usize] = color;
                             }
                         }
                     }
                 }
+                dirty[screen_current] = Some(*at);
                 let mut flip = false;
                 if *reversed {
                     *at += IVec2::new(-1, if at.x%2==0 { 1 } else { 0 });

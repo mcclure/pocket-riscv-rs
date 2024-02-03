@@ -89,6 +89,17 @@ impl IRect2 {
         if excess < 0 { return self.offset(IVec2::new(excess, 0)) }
         self.clone()
     }
+
+    pub fn overlap(&self, test:IRect2) -> Option<IRect2> { // FIXME: Naming in this class is vague about what is a query and what is a verb
+        if !self.intersect(test) {
+            None
+        } else {
+            Some(IRect2::new(
+                self.ul.max(test.ul),
+                self.br.min(test.br)
+            ))
+        }
+    }
 }
 
 // Unit tests
@@ -115,5 +126,23 @@ mod tests {
                 assert_eq!(rect.intersect(r2), !(x==0 || x==4 || y==0 || y==4), "Incorrect intersect! rect: {:?} v: {:?}", rect, r2);
             }
         }
+    }
+
+    fn overlap() { // Not yet run
+        let centered = IRect2::new(IVec2::new(1,1), IVec2::new(9,9));
+        let away = IRect2::new(IVec2::ZERO, IVec2::new(1,1));
+        let top    = IRect2::new(IVec2::new(4,0), IVec2::new(6,2));
+        let left   = IRect2::new(IVec2::new(0,4), IVec2::new(2,6));
+        let right  = IRect2::new(IVec2::new(8,4), IVec2::new(10,6));
+        let bottom = IRect2::new(IVec2::new(4,8), IVec2::new(6,10));
+        fn test_both(target:Option<IRect2>, a:IRect2, b:IRect2, b_name:&str) {
+            assert_eq!(target, a.overlap(b), "Failed center [{:?}] .overlap {} [{:?}]", a, b_name, b);
+            assert_eq!(target, b.overlap(a), "Failed {} [{:?}] .overlap center [{:?}]", b_name, b, a);
+        }
+        test_both(None, centered, away, "away");
+        test_both(Some(IRect2::new(IVec2::new(4, 1), IVec2::new(6, 2))), centered, top, "top");
+        test_both(Some(IRect2::new(IVec2::new(1, 4), IVec2::new(2, 6))), centered, left, "left");
+        test_both(Some(IRect2::new(IVec2::new(8, 4), IVec2::new(4, 10))), centered, right, "right");
+        test_both(Some(IRect2::new(IVec2::new(4, 9), IVec2::new(6, 10))), centered, bottom, "bottom");
     }
 }
