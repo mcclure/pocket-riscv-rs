@@ -235,7 +235,9 @@ fn main() -> ! {
             unsafe { // This will be u64, not u32, on a LP64 system
                 peripherals.VIDEO_FRAMEBUFFER.dma_base.write(|w| w.bits( screens[screen_current].as_ptr() as u32 ));
             }
-            screen_current = (screen_current + 1)%2;
+            if !paused {
+                screen_current = (screen_current + 1)%2;
+            }
 
             #[cfg(feature = "speed-debug")]
             {
@@ -263,10 +265,7 @@ fn main() -> ! {
                 unsafe { peripherals.CTRL.reset.write(|w| w.bits(1)); } // 1 resets entire SOC
             }
 
-            // Controls: Pause
-            if !dead && cont1_key_edge & FaceSelect as u16 != 0 {
-                paused = !paused;
-            }
+            // Note: Pause controls happen late (to allow next frame to complete drawing)
 
             // Mechanics
 
@@ -278,7 +277,7 @@ fn main() -> ! {
             if screens_dirty[screen_current] { // First pass full-screen draw
                 dirty_temp.push(display_rect);
                 screens_dirty[screen_current] = false;
-            } else {
+            } else if (!paused) {
                 for Sprite {idx:sprite_idx, dirty, ..} in sprites.iter() {
                     if let Some(at) = dirty[screen_current] {
                         let size = {
@@ -318,42 +317,44 @@ fn main() -> ! {
             dirty_temp.clear(); // Reuse one vector so we're not reallocating
 
             // Draw sprites
-            for Sprite {idx: sprite_idx, at, reversed, dirty} in sprites.iter_mut() {
-                let sprite = &sprite_data[*sprite_idx];
-                let transparent = unsafe { *sprite.pixels };
-                for y in 0..sprite.h {
-                    for x in 0..sprite.w {
-                        let pix_at = *at + IVec2::new(x as i32, y as i32);
-                        if (ivec2_within(display, pix_at)) {
-                            // WARNING: u16 MATH COULD OVERFLOW
-                            let color = unsafe { *sprite.pixels.wrapping_add((y * sprite.w + if *reversed && sprite.flippable { sprite.w - x - 1 } else { x } ) as usize) };
-                            if (color != transparent) {
-                                screen[pix_at.y as usize * DISPLAY_WIDTH + pix_at.x as usize] = color;
+            if (!paused) {
+                for Sprite {idx: sprite_idx, at, reversed, dirty} in sprites.iter_mut() {
+                    let sprite = &sprite_data[*sprite_idx];
+                    let transparent = unsafe { *sprite.pixels };
+                    for y in 0..sprite.h {
+                        for x in 0..sprite.w {
+                            let pix_at = *at + IVec2::new(x as i32, y as i32);
+                            if (ivec2_within(display, pix_at)) {
+                                // WARNING: u16 MATH COULD OVERFLOW
+                                let color = unsafe { *sprite.pixels.wrapping_add((y * sprite.w + if *reversed && sprite.flippable { sprite.w - x - 1 } else { x } ) as usize) };
+                                if (color != transparent) {
+                                    screen[pix_at.y as usize * DISPLAY_WIDTH + pix_at.x as usize] = color;
+                                }
                             }
                         }
                     }
-                }
-                dirty[screen_current] = Some(*at);
-                let mut flip = false;
-                if *reversed {
-                    *at += IVec2::new(-1, if at.x%2==0 { 1 } else { 0 });
-                    if at.x <= 0 {
-                        flip = true;
-                    }
-                } else {
-                    *at += IVec2::new(1, 0);
-                    if at.x + sprite.w as i32 >= DISPLAY_WIDTH as i32 {
-                        flip = true;
-                    }
-                }
-                if (flip) {
-                    *reversed = !*reversed;
-                    audio_bleeping = AUDIO_BLEEP_LEN;
-                    if at.y + sprite.h as i32 >= DISPLAY_HEIGHT as i32 {
-                        *at = IVec2::ZERO;
-                        audio_pitch_mod = 1;
+                    dirty[screen_current] = Some(*at);
+                    let mut flip = false;
+                    if *reversed {
+                        *at += IVec2::new(-1, if at.x%2==0 { 1 } else { 0 });
+                        if at.x <= 0 {
+                            flip = true;
+                        }
                     } else {
-                        audio_pitch_mod = 2;
+                        *at += IVec2::new(1, 0);
+                        if at.x + sprite.w as i32 >= DISPLAY_WIDTH as i32 {
+                            flip = true;
+                        }
+                    }
+                    if (flip) {
+                        *reversed = !*reversed;
+                        audio_bleeping = AUDIO_BLEEP_LEN;
+                        if at.y + sprite.h as i32 >= DISPLAY_HEIGHT as i32 {
+                            *at = IVec2::ZERO;
+                            audio_pitch_mod = 1;
+                        } else {
+                            audio_pitch_mod = 2;
+                        }
                     }
                 }
             }
@@ -386,6 +387,13 @@ fn main() -> ! {
             }
 
             unsafe { peripherals.APF_AUDIO.playback_en.write(|w| w.bits(1)) };
+
+            // Late mechanics
+
+            // Controls: Pause
+            if !dead && cont1_key_edge & FaceSelect as u16 != 0 {
+                paused = !paused;
+            }
 
             // Uncomment if you need to know if you're on the first frame
             // if (!paused) {
