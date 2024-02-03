@@ -142,8 +142,16 @@ fn main() -> ! {
 
         const AUDIO_TARGET:i32 = 48000/60 + 200; // Try to always fill audio buffer to this point
 
+        // Audio comes in the form of a single sawwave generator that can be reset or int-pitchshifted
+
+        const AUDIO_FREQ_DELTA:u16 = 150; // Step of basic sawtooth wave; increase to increase pitch of bleeps/bloops
+        const AUDIO_BLEEP_LEN:u16 = 800*2; // How long (in samples) does a single bleep last?
+
         // Audio state
 
+        let mut audio_wave:u16 = 0; // Sawtooth wave state used for all sounds
+        let mut audio_bleeping = 0; // Remaining samples to play bleep
+        let mut audio_pitch_mod = 2; // Pitch multiplier. x2 for one octave
 
         // Game properties
 
@@ -234,6 +242,7 @@ fn main() -> ! {
                 let video = peripherals.APF_VIDEO.video.read();
                 if !video.vblank_status().bit() { // Status has already gone low
                     if 0== missed_deadline_count % SPEED_DEBUG_RATE {
+                        #[cfg(feature = "speed-debug-serial")]
                         println!("Too slow! Drawing finished outside vblank deadline (fail #{})", missed_deadline_count);
                     }
                     missed_deadline_already = true;
@@ -339,8 +348,12 @@ fn main() -> ! {
                 }
                 if (flip) {
                     *reversed = !*reversed;
+                    audio_bleeping = AUDIO_BLEEP_LEN;
                     if at.y + sprite.h as i32 >= DISPLAY_HEIGHT as i32 {
                         *at = IVec2::ZERO;
+                        audio_pitch_mod = 1;
+                    } else {
+                        audio_pitch_mod = 2;
                     }
                 }
             }
@@ -350,7 +363,15 @@ fn main() -> ! {
             // Generate enough samples to fill us up to our desired buffer (a frame plus a safety margin)
             let audio_needed = AUDIO_TARGET - peripherals.APF_AUDIO.buffer_fill.read().bits() as i32;
             for _ in 0..audio_needed {
-                let audio_wave:u32 = 0;
+                if audio_bleeping>0 { // Currently bleeping. Note: Does NOT depend on paused
+                    audio_bleeping -= 1;
+
+                    // freq_delta will determine the frequency of the saw generator this sample
+                    let freq_delta = AUDIO_FREQ_DELTA * audio_pitch_mod;
+
+                    // Simplest waveform possible: Increment last sample's value by the delta, then wrap around at 2^16
+                    audio_wave = audio_wave.wrapping_add(freq_delta);
+                }
 
                 let mut value:u32 = audio_wave as u32;
 
