@@ -153,14 +153,14 @@ fn main() -> ! {
 
         // Audio comes in the form of a single sawwave generator that can be reset or int-pitchshifted
 
-        const AUDIO_FREQ_DELTA:u16 = 150; // Step of basic sawtooth wave; increase to increase pitch of bleeps/bloops
+        const AUDIO_FREQ_DELTA:u16 = 75; // Step of basic sawtooth wave; increase to increase pitch of bleeps/bloops
         const AUDIO_BLEEP_LEN:u16 = 800*2; // How long (in samples) does a single bleep last?
 
         // Audio state
 
         let mut audio_wave:u16 = 0; // Sawtooth wave state used for all sounds
         let mut audio_bleeping = 0; // Remaining samples to play bleep
-        let mut audio_pitch_mod = 2; // Pitch multiplier. x2 for one octave
+        let mut audio_pitch_mod = 4; // Pitch multiplier. x2 for one octave
 
         // Game properties
 
@@ -173,11 +173,11 @@ fn main() -> ! {
         }
 
         struct Sprite {
-            idx:usize, at:IVec2, reversed:bool, dirty:[Option<IVec2>;2] 
+            idx:usize, at:IVec2, reversed:bool, stopped:bool, dirty:[Option<IVec2>;2]
         }
         impl Sprite {
             pub fn new(idx:usize, at:IVec2, reversed:bool) -> Sprite {
-                Sprite { idx, at, reversed, dirty:[None, None] }
+                Sprite { idx, at, reversed, stopped:false, dirty:[None, None] }
             }
         }
 
@@ -300,6 +300,25 @@ fn main() -> ! {
                 if select_idx >= sprites.len() { select_idx = sprites.len() - 1; } // TODO
             }
 
+            // Controls: Halt selected
+            if cont1_key_edge & (FaceX as u16) != 0 {
+                let selected = &mut sprites[select_idx];
+                selected.stopped = !selected.stopped;
+
+                audio_bleeping = AUDIO_BLEEP_LEN;
+                audio_pitch_mod = 8;
+            }
+
+            // Controls: Reset selected
+            if cont1_key_edge & (FaceA as u16) != 0 {
+                let selected = &mut sprites[select_idx];
+                selected.at = IVec2::ZERO;
+                selected.reversed = false;
+
+                audio_bleeping = AUDIO_BLEEP_LEN;
+                audio_pitch_mod = 2;
+            }
+
             // Note: Pause controls happen late (to allow next frame to complete drawing)
 
             // Mechanics
@@ -367,7 +386,7 @@ fn main() -> ! {
                         (select_blink_remain / SELECT_BLINK_MODULUS) % 2 == 0
                     } else { false };
 
-                for (idx, Sprite {idx: sprite_idx, at, reversed, dirty}) in sprites.iter_mut().enumerate() {
+                for (idx, Sprite {idx: sprite_idx, at, reversed, dirty, stopped}) in sprites.iter_mut().enumerate() {
                     let sprite = &sprite_data[*sprite_idx];
                     let blinking = select_blink_active && idx == select_idx;
                     if !blinking {
@@ -388,29 +407,31 @@ fn main() -> ! {
                     } else {
                         dirty[screen_current] = None;
                     }
-                    let mut flip = false;
-                    if *reversed {
-                        *at += IVec2::new(-1, if at.x%2==0 { 1 } else { 0 });
-                        if at.x <= 0 {
-                            flip = true;
-                        }
-                    } else {
-                        *at += IVec2::new(1, 0);
-                        if at.x + sprite.w as i32 >= DISPLAY_WIDTH as i32 {
-                            flip = true;
-                        }
-                    }
-                    if (flip) {
-                        *reversed = !*reversed;
-                        audio_bleeping = AUDIO_BLEEP_LEN;
-                        if at.y + sprite.h as i32 >= DISPLAY_HEIGHT as i32 {
-                            *at = IVec2::new(0, at.y - DISPLAY_HEIGHT as i32);
-                            audio_pitch_mod = 1;
-
-                            // Uncomment this next line to test the speed test rectangle. Yes, this is silly
-                            // for _ in 1..1000000 { audio_pitch_mod *= 3 }
+                    if !*stopped {
+                        let mut flip = false;
+                        if *reversed {
+                            *at += IVec2::new(-1, if at.x%2==0 { 1 } else { 0 });
+                            if at.x <= 0 {
+                                flip = true;
+                            }
                         } else {
-                            audio_pitch_mod = 2;
+                            *at += IVec2::new(1, 0);
+                            if at.x + sprite.w as i32 >= DISPLAY_WIDTH as i32 {
+                                flip = true;
+                            }
+                        }
+                        if (flip) {
+                            *reversed = !*reversed;
+                            audio_bleeping = AUDIO_BLEEP_LEN;
+                            if at.y + sprite.h as i32 >= DISPLAY_HEIGHT as i32 {
+                                *at = IVec2::new(0, at.y - DISPLAY_HEIGHT as i32);
+                                audio_pitch_mod = 2;
+
+                                // Uncomment this next line to test the speed test rectangle. Yes, this is silly
+                                // for _ in 1..1000000 { audio_pitch_mod *= 3 }
+                            } else {
+                                audio_pitch_mod = 4;
+                            }
                         }
                     }
                 }
