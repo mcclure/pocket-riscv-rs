@@ -173,11 +173,11 @@ fn main() -> ! {
         }
 
         struct Sprite {
-            idx:usize, at:IVec2, reversed:bool, stopped:bool, dirty:[Option<IVec2>;2]
+            idx:usize, at:IVec2, reversed:bool, stopped:bool, dead:bool, dirty:[Option<IVec2>;2]
         }
         impl Sprite {
             pub fn new(idx:usize, at:IVec2, reversed:bool) -> Sprite {
-                Sprite { idx, at, reversed, stopped:false, dirty:[None, None] }
+                Sprite { idx, at, reversed, stopped:false, dead:false, dirty:[None, None] }
             }
         }
 
@@ -308,13 +308,15 @@ fn main() -> ! {
                     select_blink_remain = SELECT_BLINK_STANDARD;
                 }
                 if cont1_key_edge & (DpadRight as u16) != 0 {
-                    let old_selected = &sprites[select_idx];
+                    let (old_idx, old_at) = {
+                        let selected = &sprites[select_idx];
+                        (selected.idx, selected.at)
+                    };
                     select_idx += 1;
                     select_blink_remain = SELECT_BLINK_STANDARD;
                     if select_idx >= sprites.len() { // Spawn new on overflow
-                        let old_at = old_selected.at;
                         let h32 = DISPLAY_HEIGHT as i32;
-                        sprites.push(Sprite::new((old_selected.idx+1)%sprite_data.len(), IVec2::new(old_at.x, (old_at.y + h32*7/4) % h32), false));
+                        sprites.push(Sprite::new((old_idx+1)%sprite_data.len(), IVec2::new(old_at.x, (old_at.y + h32*7/4) % h32), false));
                         audio_bleeping = AUDIO_BLEEP_LEN;
                         audio_pitch_mod = 16;
                         select_blink_remain += SELECT_BLINK_MODULUS;
@@ -348,6 +350,21 @@ fn main() -> ! {
 
                 audio_bleeping = AUDIO_BLEEP_LEN;
                 audio_pitch_mod = 2;
+            }
+
+            // Controls: Destroy selected
+            if cont1_key_edge & (FaceB as u16) != 0 {
+                let mut live_count = 0;
+                for Sprite { dead, .. } in sprites.iter() { if !dead { live_count += 1; } }
+                audio_bleeping = AUDIO_BLEEP_LEN;
+                if live_count > 1 {
+                    let selected = &mut sprites[select_idx];
+                    selected.dead = true;
+                    audio_pitch_mod = 2;
+                } else {
+                    // Denied
+                    audio_pitch_mod = 1;
+                }
             }
 
             // Note: Pause controls happen late (to allow next frame to complete drawing)
@@ -417,9 +434,11 @@ fn main() -> ! {
                         (select_blink_remain / SELECT_BLINK_MODULUS) % 2 == 0
                     } else { false };
 
-                for (idx, Sprite {idx: sprite_idx, at, reversed, dirty, stopped}) in sprites.iter_mut().enumerate() {
+                let mut any_dead = false;
+
+                for (idx, Sprite {idx: sprite_idx, at, reversed, dead, dirty, stopped}) in sprites.iter_mut().enumerate() {
                     let sprite = &sprite_data[*sprite_idx];
-                    let blinking = select_blink_active && idx == select_idx;
+                    let blinking = select_blink_active && idx == select_idx || *dead;
                     if !blinking {
                         let transparent = unsafe { *sprite.pixels };
                         for y in 0..sprite.h {
@@ -438,7 +457,7 @@ fn main() -> ! {
                     } else {
                         dirty[screen_current] = None;
                     }
-                    if !*stopped {
+                    if !(*stopped || *dead) {
                         let mut flip = false;
                         if *reversed {
                             *at += IVec2::new(-1, if at.x%2==0 { 1 } else { 0 });
@@ -465,6 +484,22 @@ fn main() -> ! {
                             }
                         }
                     }
+                    if *dead { any_dead = true }
+                }
+
+                if any_dead {
+                    let mut max = sprites.len();
+                    let mut idx = 0;
+                    while idx < max {
+                        if sprites[idx].dead {
+                            if select_idx > idx { select_idx -= 1 }
+                            max -= 1;
+                            sprites.remove(idx);
+                        } else {
+                            idx += 1;
+                        }
+                    }
+                    select_idx = core::cmp::max(select_idx, sprites.len()-1);
                 }
             }
 
