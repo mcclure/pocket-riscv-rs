@@ -123,11 +123,11 @@ fn main() -> ! {
         let mut paused = false;
         let dead = false;
         let mut cont1_key_last = 0; // State of controller on previous loop
+        // let mut first_frame = true;
 
         // UI
         let mut select_blink_remain = 0;
         let mut select_idx;
-        // let mut first_frame = true;
 
         // Display
 
@@ -287,17 +287,31 @@ fn main() -> ! {
                 unsafe { peripherals.CTRL.reset.write(|w| w.bits(1)); } // 1 resets entire SOC
             }
 
-            // Controls: Selection
-
-            if cont1_key_edge & (TrigL1 as u16 | DpadLeft as u16 | DpadRight as u16) != 0 {
+            // Controls: Select highlight
+            if cont1_key_edge & TrigL1 as u16 != 0 {
                 select_blink_remain = SELECT_BLINK_STANDARD;
             }
-            if cont1_key_edge & (DpadLeft as u16) != 0 {
-                if select_idx > 0 { select_idx -= 1; }
-            }
-            if cont1_key_edge & (DpadRight as u16) != 0 {
-                select_idx += 1;
-                if select_idx >= sprites.len() { select_idx = sprites.len() - 1; } // TODO
+
+            // Controls: Directly control selected (toggle)
+            let select_control = cont1_key & (FaceY as u16) != 0;
+
+            if select_control {
+                // Directly control selected
+                let selected = &mut sprites[select_idx];
+                if cont1_key & (DpadUp as u16) != 0 { selected.at += IVec2::new(0,-1); }
+                if cont1_key & (DpadDown as u16) != 0 { selected.at += IVec2::new(0,1); }
+                if cont1_key & (DpadLeft as u16) != 0 { selected.at += IVec2::new(-1,0); }
+                if cont1_key & (DpadRight as u16) != 0 { selected.at += IVec2::new(1,0); }
+            } else {
+                if cont1_key_edge & (DpadLeft as u16) != 0 {
+                    if select_idx > 0 { select_idx -= 1; }
+                    select_blink_remain = SELECT_BLINK_STANDARD;
+                }
+                if cont1_key_edge & (DpadRight as u16) != 0 {
+                    select_idx += 1;
+                    if select_idx >= sprites.len() { select_idx = sprites.len() - 1; } // TODO
+                    select_blink_remain = SELECT_BLINK_STANDARD;
+                }
             }
 
             // Controls: Halt selected
