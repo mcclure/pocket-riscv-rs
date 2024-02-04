@@ -117,9 +117,16 @@ fn main() -> ! {
 
         // Basic state
 
+        const SELECT_BLINK_STANDARD:i32 = 40;
+        const SELECT_BLINK_MODULUS:i32 = 5;
+
         let mut paused = false;
         let dead = false;
         let mut cont1_key_last = 0; // State of controller on previous loop
+
+        // UI
+        let mut select_blink_remain = 0;
+        let mut select_idx;
         // let mut first_frame = true;
 
         // Display
@@ -194,6 +201,8 @@ fn main() -> ! {
 
         sprites.push(Sprite::new(1, IVec2::ZERO, false)); // idx, location, reversed, flippable
         sprites.push(Sprite::new(0, display/2, false));
+
+        select_idx = sprites.len() - 1;
 
         let mut dirty_temp:Vec<IRect2> = Default::default();
 
@@ -278,6 +287,19 @@ fn main() -> ! {
                 unsafe { peripherals.CTRL.reset.write(|w| w.bits(1)); } // 1 resets entire SOC
             }
 
+            // Controls: Selection
+
+            if cont1_key_edge & (TrigL1 as u16 | DpadLeft as u16 | DpadRight as u16) != 0 {
+                select_blink_remain = SELECT_BLINK_STANDARD;
+            }
+            if cont1_key_edge & (DpadLeft as u16) != 0 {
+                if select_idx > 0 { select_idx -= 1; }
+            }
+            if cont1_key_edge & (DpadRight as u16) != 0 {
+                select_idx += 1;
+                if select_idx >= sprites.len() { select_idx = sprites.len() - 1; } // TODO
+            }
+
             // Note: Pause controls happen late (to allow next frame to complete drawing)
 
             // Mechanics
@@ -339,22 +361,33 @@ fn main() -> ! {
 
             // Draw sprites
             if (!paused) {
-                for Sprite {idx: sprite_idx, at, reversed, dirty} in sprites.iter_mut() {
+                let select_blink_active =
+                    if select_blink_remain > 0 {
+                        select_blink_remain -= 1;
+                        (select_blink_remain / SELECT_BLINK_MODULUS) % 2 == 0
+                    } else { false };
+
+                for (idx, Sprite {idx: sprite_idx, at, reversed, dirty}) in sprites.iter_mut().enumerate() {
                     let sprite = &sprite_data[*sprite_idx];
-                    let transparent = unsafe { *sprite.pixels };
-                    for y in 0..sprite.h {
-                        for x in 0..sprite.w {
-                            let pix_at = *at + IVec2::new(x as i32, y as i32);
-                            if (ivec2_within(display, pix_at)) {
-                                // WARNING: u16 MATH COULD OVERFLOW
-                                let color = unsafe { *sprite.pixels.wrapping_add((y * sprite.w + if *reversed && sprite.flippable { sprite.w - x - 1 } else { x } ) as usize) };
-                                if (color != transparent) {
-                                    screen[pix_at.y as usize * DISPLAY_WIDTH + pix_at.x as usize] = color;
+                    let blinking = select_blink_active && idx == select_idx;
+                    if !blinking {
+                        let transparent = unsafe { *sprite.pixels };
+                        for y in 0..sprite.h {
+                            for x in 0..sprite.w {
+                                let pix_at = *at + IVec2::new(x as i32, y as i32);
+                                if (ivec2_within(display, pix_at)) {
+                                    // WARNING: u16 MATH COULD OVERFLOW
+                                    let color = unsafe { *sprite.pixels.wrapping_add((y * sprite.w + if *reversed && sprite.flippable { sprite.w - x - 1 } else { x } ) as usize) };
+                                    if (color != transparent) {
+                                        screen[pix_at.y as usize * DISPLAY_WIDTH + pix_at.x as usize] = color;
+                                    }
                                 }
                             }
                         }
+                        dirty[screen_current] = Some(*at);
+                    } else {
+                        dirty[screen_current] = None;
                     }
-                    dirty[screen_current] = Some(*at);
                     let mut flip = false;
                     if *reversed {
                         *at += IVec2::new(-1, if at.x%2==0 { 1 } else { 0 });
