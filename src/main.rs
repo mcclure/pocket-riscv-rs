@@ -312,6 +312,14 @@ fn main() -> ! {
                     if select_idx >= sprites.len() { select_idx = sprites.len() - 1; } // TODO
                     select_blink_remain = SELECT_BLINK_STANDARD;
                 }
+                if cont1_key_edge & (DpadUp as u16 | DpadDown as u16) != 0 {
+                    let selected = &mut sprites[select_idx];
+                    let dir:isize = if cont1_key_edge & DpadUp as u16 != 0 { -1 } else { 1 };
+                    selected.idx = (selected.idx as isize + dir).rem_euclid(sprite_data.len() as isize) as usize;
+
+                    audio_bleeping = AUDIO_BLEEP_LEN;
+                    audio_pitch_mod = 8;
+                }
             }
 
             // Controls: Halt selected
