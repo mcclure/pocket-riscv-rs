@@ -371,7 +371,7 @@ fn main() -> ! {
                         *reversed = !*reversed;
                         audio_bleeping = AUDIO_BLEEP_LEN;
                         if at.y + sprite.h as i32 >= DISPLAY_HEIGHT as i32 {
-                            *at = IVec2::ZERO;
+                            *at = IVec2::new(0, at.y - DISPLAY_HEIGHT as i32);
                             audio_pitch_mod = 1;
 
                             // Uncomment this next line to test the speed test rectangle. Yes, this is silly
