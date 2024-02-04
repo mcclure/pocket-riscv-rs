@@ -121,7 +121,7 @@ fn main() -> ! {
         const SELECT_BLINK_MODULUS:i32 = 5;
 
         let mut paused = false;
-        let dead = false;
+        let game_dead = false;
         let mut cont1_key_last = 0; // State of controller on previous loop
         // let mut first_frame = true;
 
@@ -172,12 +172,18 @@ fn main() -> ! {
             flippable: bool
         }
 
-        struct Sprite {
-            idx:usize, at:IVec2, reversed:bool, stopped:bool, dead:bool, dirty:[Option<IVec2>;2]
+        #[derive(PartialEq, Eq)]
+        enum Lifetime {
+            Live, Dying, Dead // Dying is a phase for deleting damage
         }
+
+        struct Sprite {
+            idx:usize, at:IVec2, reversed:bool, stopped:bool, live:Lifetime, dirty:[Option<IVec2>;2]
+        }
+
         impl Sprite {
             pub fn new(idx:usize, at:IVec2, reversed:bool) -> Sprite {
-                Sprite { idx, at, reversed, stopped:false, dead:false, dirty:[None, None] }
+                Sprite { idx, at, reversed, stopped:false, live:Lifetime::Live, dirty:[None, None] }
             }
         }
 
@@ -355,11 +361,11 @@ fn main() -> ! {
             // Controls: Destroy selected
             if cont1_key_edge & (FaceB as u16) != 0 {
                 let mut live_count = 0;
-                for Sprite { dead, .. } in sprites.iter() { if !dead { live_count += 1; } }
+                for Sprite { live, .. } in sprites.iter() { if *live == Lifetime::Live { live_count += 1; } }
                 audio_bleeping = AUDIO_BLEEP_LEN;
                 if live_count > 1 {
                     let selected = &mut sprites[select_idx];
-                    selected.dead = true;
+                    selected.live = Lifetime::Dying;
                     audio_pitch_mod = 2;
                 } else {
                     // Denied
@@ -434,12 +440,13 @@ fn main() -> ! {
                         (select_blink_remain / SELECT_BLINK_MODULUS) % 2 == 0
                     } else { false };
 
-                let mut any_dead = false;
+                let mut any_delete = false;
 
-                for (idx, Sprite {idx: sprite_idx, at, reversed, dead, dirty, stopped}) in sprites.iter_mut().enumerate() {
+                for (idx, Sprite {idx: sprite_idx, at, reversed, live, dirty, stopped}) in sprites.iter_mut().enumerate() {
                     let sprite = &sprite_data[*sprite_idx];
-                    let blinking = select_blink_active && idx == select_idx || *dead;
-                    if !blinking {
+                    let blinking = select_blink_active && idx == select_idx;
+                    let dying = *live != Lifetime::Live;
+                    if !(blinking || dying) {
                         let transparent = unsafe { *sprite.pixels };
                         for y in 0..sprite.h {
                             for x in 0..sprite.w {
@@ -457,7 +464,7 @@ fn main() -> ! {
                     } else {
                         dirty[screen_current] = None;
                     }
-                    if !(*stopped || *dead) {
+                    if !(*stopped || dying) {
                         let mut flip = false;
                         if *reversed {
                             *at += IVec2::new(-1, if at.x%2==0 { 1 } else { 0 });
@@ -484,14 +491,15 @@ fn main() -> ! {
                             }
                         }
                     }
-                    if *dead { any_dead = true }
+                    if *live == Lifetime::Dying { *live = Lifetime::Dead }
+                    else if *live == Lifetime::Dead { any_delete = true }
                 }
 
-                if any_dead {
+                if any_delete {
                     let mut max = sprites.len();
                     let mut idx = 0;
                     while idx < max {
-                        if sprites[idx].dead {
+                        if sprites[idx].live == Lifetime::Dead {
                             if select_idx > idx { select_idx -= 1 }
                             max -= 1;
                             sprites.remove(idx);
@@ -535,7 +543,7 @@ fn main() -> ! {
             // Late mechanics
 
             // Controls: Pause // TODO move check earlier
-            if !dead && cont1_key_edge & FaceSelect as u16 != 0 {
+            if !game_dead && cont1_key_edge & FaceSelect as u16 != 0 {
                 paused = !paused;
             }
 
