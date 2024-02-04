@@ -304,13 +304,22 @@ fn main() -> ! {
                 if cont1_key & (DpadRight as u16) != 0 { selected.at += IVec2::new(1,0); }
             } else {
                 if cont1_key_edge & (DpadLeft as u16) != 0 {
-                    if select_idx > 0 { select_idx -= 1; }
+                    if select_idx > 0 { select_idx -= 1; } // No underflow
                     select_blink_remain = SELECT_BLINK_STANDARD;
                 }
                 if cont1_key_edge & (DpadRight as u16) != 0 {
+                    let old_selected = &sprites[select_idx];
                     select_idx += 1;
-                    if select_idx >= sprites.len() { select_idx = sprites.len() - 1; } // TODO
                     select_blink_remain = SELECT_BLINK_STANDARD;
+                    if select_idx >= sprites.len() { // Spawn new on overflow
+                        let old_at = old_selected.at;
+                        let h32 = DISPLAY_HEIGHT as i32;
+                        sprites.push(Sprite::new((old_selected.idx+1)%sprite_data.len(), IVec2::new(old_at.x, (old_at.y + h32*7/4) % h32), false));
+                        audio_bleeping = AUDIO_BLEEP_LEN;
+                        audio_pitch_mod = 16;
+                        select_blink_remain += SELECT_BLINK_MODULUS;
+                        println!("Spawned: Count {}", sprites.len());
+                    }
                 }
                 if cont1_key_edge & (DpadUp as u16 | DpadDown as u16) != 0 {
                     let selected = &mut sprites[select_idx];
