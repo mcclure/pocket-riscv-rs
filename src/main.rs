@@ -499,7 +499,7 @@ fn main() -> ! {
                             idx += 1;
                         }
                     }
-                    select_idx = core::cmp::max(select_idx, sprites.len()-1);
+                    select_idx = core::cmp::min(select_idx, sprites.len()-1);
                 }
             }
 
