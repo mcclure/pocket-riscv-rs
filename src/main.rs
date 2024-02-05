@@ -99,7 +99,7 @@ fn main() -> ! {
     println!("-- Sprite test --");
 
     // Framebuffer pointer
-    // Note we also had the option of simply picking an address and writing dma_base instead of reading it
+    // We have two framebuffers, allocated on the heat, which we switch every frame.
     const DISPLAY_LEN:usize = DISPLAY_HEIGHT*DISPLAY_WIDTH;
     let mut screens = [Box::new([0 as u16; DISPLAY_LEN]), Box::new([0 as u16; DISPLAY_LEN])];
     let mut fullscreen_dirty = [true, true];
@@ -117,28 +117,28 @@ fn main() -> ! {
 
         // Basic state
 
-        const SELECT_BLINK_STANDARD:i32 = 40;
-        const SELECT_BLINK_MODULUS:i32 = 5;
-
         let mut paused = false;
-        let game_dead = false;
+        let game_over = false; // Unused
         let mut cont1_key_last = 0; // State of controller on previous loop
         // let mut first_frame = true;
 
         // UI
-        let mut select_blink_remain = 0;
-        let mut select_idx;
+        const SELECT_BLINK_STANDARD:i32 = 40; // How many frames is a select blink?
+        const SELECT_BLINK_MODULUS:i32 = 5;   // How many frames for select blink to toggle?
+
+        let mut select_idx; // Sprite which is selected for operations
+        let mut select_blink_remain = 0; // When >0, counts down while selected sprite blinks
 
         // Display
 
-        cfg_if::cfg_if! {
+        cfg_if::cfg_if! { // This --feature has code scattered throughout
             if #[cfg(feature = "speed-debug")] { // State used to detect deadline misses
                 const SPEED_DEBUG_RATE:u32 = 1; // Every frame
                 let mut frame_already_overdue:bool = false;
                 let mut video_frame_counter_last:Option<u32> = None;
                 let mut missed_deadline_count:u32 = 0;
                 let mut missed_deadline_already = false;
-                let mut frame_deadline_state;
+                let mut frame_deadline_state; // If a message would have been printed at the start of this frame, what?
                 let mut frame_deadline_state_was = [0,0]; // Initial values will be unread
                 let mut frame_deadline_state_changed = false; // Initial value will be unread
             }
@@ -169,7 +169,7 @@ fn main() -> ! {
         struct RawImage {
             w:u16, h:u16,
             pixels: *const u16,
-            flippable: bool
+            flippable: bool // If false, reversing face doesn't change sprite
         }
 
         #[derive(PartialEq, Eq)]
@@ -178,7 +178,12 @@ fn main() -> ! {
         }
 
         struct Sprite {
-            idx:usize, at:IVec2, reversed:bool, stopped:bool, live:Lifetime, dirty:[Option<IVec2>;2]
+            idx:usize, // Index in sprite_data
+            at:IVec2, // ul
+            reversed:bool, // false for face right, true for face left
+            stopped:bool, // true if UI has told it to stop moving
+            live:Lifetime, // flag deletion process (takes 2 frames)
+            dirty:[Option<IVec2>;2] // We must track 2 dirty rectangles bc double buffering
         }
 
         impl Sprite {
@@ -187,15 +192,19 @@ fn main() -> ! {
             }
         }
 
+        // "Background" sprite
         let playfield = RawImage { w:256, h:192, flippable:false, pixels: include_bytes!(concat!(env!("OUT_DIR"), "/playfield_bg.bin")) as *const u8 as _ };
         let playfield_size = IVec2::new(playfield.w as i32, playfield.h as i32);
         let playfield_basis = (display - playfield_size) / 2;
 
+        // Character sprites
         let witch = RawImage { w:30, h:30, flippable: true, pixels: include_bytes!(concat!(env!("OUT_DIR"), "/player_hit.bin")) as *const u8 as _ };
         let blobber = RawImage { w:34, h:34, flippable: false, pixels: include_bytes!(concat!(env!("OUT_DIR"), "/blobber_attack.bin")) as *const u8 as _ };
 
+        // Shared data for sprites
         let sprite_data = [witch, blobber];
 
+        // When a frame deadline is missed, draw a red rectangle bar at the bottom
         #[cfg(feature = "speed-debug")]
         let speed_debug_rect = {
             let margin = playfield_basis.y/3;
@@ -203,13 +212,17 @@ fn main() -> ! {
             IRect2::new(ul, ul + IVec2::new(DISPLAY_WIDTH as i32, margin))
         };
 
+        // Movable sprites
         let mut sprites: Vec<Sprite> = Default::default();
 
+        // Default to two
         sprites.push(Sprite::new(1, IVec2::ZERO, false)); // idx, location, reversed, flippable
         sprites.push(Sprite::new(0, display/2, false));
 
+        // Select second in UI
         select_idx = sprites.len() - 1;
 
+        // This is only used in the loop scope, but we allocate it here so capacity gets reused
         let mut dirty_temp:Vec<IRect2> = Default::default();
 
         loop {
@@ -309,6 +322,7 @@ fn main() -> ! {
                 if cont1_key & (DpadLeft as u16) != 0 { selected.at += IVec2::new(-1,0); }
                 if cont1_key & (DpadRight as u16) != 0 { selected.at += IVec2::new(1,0); }
             } else {
+                // Not controlling, so D-pad is for selecting
                 if cont1_key_edge & (DpadLeft as u16) != 0 {
                     if select_idx > 0 { select_idx -= 1; } // No underflow
                     select_blink_remain = SELECT_BLINK_STANDARD;
@@ -320,22 +334,23 @@ fn main() -> ! {
                     };
                     select_idx += 1;
                     select_blink_remain = SELECT_BLINK_STANDARD;
-                    if select_idx >= sprites.len() { // Spawn new on overflow
+                    if select_idx >= sprites.len() { // Spawn new sprite on overflow
                         let h32 = DISPLAY_HEIGHT as i32;
                         sprites.push(Sprite::new((old_idx+1)%sprite_data.len(), IVec2::new(old_at.x, (old_at.y + h32*7/4) % h32), false));
                         audio_bleeping = AUDIO_BLEEP_LEN;
-                        audio_pitch_mod = 16;
+                        audio_pitch_mod = 16; // Super high beep (for spawn)
                         select_blink_remain += SELECT_BLINK_MODULUS;
                         println!("Spawned: Count {}", sprites.len());
                     }
                 }
+                // Change sprite data ("character") of selected sprite
                 if cont1_key_edge & (DpadUp as u16 | DpadDown as u16) != 0 {
                     let selected = &mut sprites[select_idx];
                     let dir:isize = if cont1_key_edge & DpadUp as u16 != 0 { -1 } else { 1 };
                     selected.idx = (selected.idx as isize + dir).rem_euclid(sprite_data.len() as isize) as usize;
 
                     audio_bleeping = AUDIO_BLEEP_LEN;
-                    audio_pitch_mod = 8;
+                    audio_pitch_mod = 8; // High beep (for UI)
                 }
             }
 
@@ -345,7 +360,7 @@ fn main() -> ! {
                 selected.stopped = !selected.stopped;
 
                 audio_bleeping = AUDIO_BLEEP_LEN;
-                audio_pitch_mod = 8;
+                audio_pitch_mod = 8; // High beep (for UI)
             }
 
             // Controls: Reset selected
@@ -355,7 +370,7 @@ fn main() -> ! {
                 selected.reversed = false;
 
                 audio_bleeping = AUDIO_BLEEP_LEN;
-                audio_pitch_mod = 2;
+                audio_pitch_mod = 2; // Low beep
             }
 
             // Controls: Destroy selected
@@ -366,10 +381,10 @@ fn main() -> ! {
                 if live_count > 1 {
                     let selected = &mut sprites[select_idx];
                     selected.live = Lifetime::Dying;
-                    audio_pitch_mod = 2;
+                    audio_pitch_mod = 2; // Low beep
                 } else {
                     // Denied
-                    audio_pitch_mod = 1;
+                    audio_pitch_mod = 1; // Super low beep (for "no")
                 }
             }
 
@@ -382,30 +397,33 @@ fn main() -> ! {
             let screen = &mut* screens[screen_current];
 
             // Clear dirty rectangles
+            // First build a vector of current-frame dirty rectangles:
             if fullscreen_dirty[screen_current] { // First pass full-screen draw
                 dirty_temp.push(display_rect);
                 fullscreen_dirty[screen_current] = false;
-            } else {
+            } else { // Fetch dirty rectangles from sprites
                 if (!paused) {
                     for Sprite {idx:sprite_idx, dirty, ..} in sprites.iter() {
-                        if let Some(at) = dirty[screen_current] {
+                        if let Some(at) = dirty[screen_current] { // This sprite has a dirty rect for this buffer
                             let size = {
                                 let sprite = &sprite_data[*sprite_idx];
                                 IVec2::new(sprite.w as i32, sprite.h as i32)
                             };
                             let rect = display_rect.overlap(IRect2::new(at, at+size));
-                            if let Some(rect) = rect {
+                            if let Some(rect) = rect { // Overlap can return none
                                 dirty_temp.push(rect);
                             }
-                            // Assume if we're already drawing, we DON'T need to clear dirty-- it will clear soon
+                            // Assume if we're already drawing, we DON'T need to clear dirty-- it will change later in loop
                         }
                     }
                 }
-                #[cfg(feature = "speed-debug")] // Note if this coincides with pause it will act weird. For debug code that's ok
+                #[cfg(feature = "speed-debug")] // Note if this coincides exactly with pause it will act weird. For debug code that's ok
                 if frame_deadline_state_changed {
                     dirty_temp.push(speed_debug_rect);
                 }
             }
+            // Now clear the known dirty rectangles.
+            // Note "clearing" could mean a background color, OR the background image, OR the debug box
             for rect in dirty_temp.iter() {
                 let background = 0;
                 #[cfg(feature = "speed-debug")]
@@ -414,9 +432,10 @@ fn main() -> ! {
                     2 => 0xF800,
                     _ => background
                 };
+                // For each pixel in this dirty rect
                 for y in rect.ul.y..rect.br.y {
                     for x in rect.ul.x..rect.br.x {
-                        let at = IVec2::new(x, y) - playfield_basis;
+                        let at = IVec2::new(x, y) - playfield_basis; // This pixel, in internal coordinates of bg image
                         screen[y as usize * DISPLAY_WIDTH + x as usize] =
                             if (ivec2_within(playfield_size, at)) {
                                 unsafe {
@@ -434,25 +453,28 @@ fn main() -> ! {
 
             // Draw sprites
             if (!paused) {
+                // Are we doing a select blink, and if so are we on a draw-off frame?
                 let select_blink_active =
                     if select_blink_remain > 0 {
                         select_blink_remain -= 1;
                         (select_blink_remain / SELECT_BLINK_MODULUS) % 2 == 0
                     } else { false };
 
+                // Have any sprites this frame hit the final death phase?
                 let mut any_delete = false;
 
+                // Draw/mechanics step for each sprite
                 for (idx, Sprite {idx: sprite_idx, at, reversed, live, dirty, stopped}) in sprites.iter_mut().enumerate() {
-                    let sprite = &sprite_data[*sprite_idx];
-                    let blinking = select_blink_active && idx == select_idx;
-                    let dying = *live != Lifetime::Live;
-                    if !(blinking || dying) {
-                        let transparent = unsafe { *sprite.pixels };
+                    let sprite = &sprite_data[*sprite_idx]; // Shared data for current sprite
+                    let blinking = select_blink_active && idx == select_idx; // Is *this* sprite blink-off?
+                    let dying = *live != Lifetime::Live; // Is this sprite hidden because it's dying?
+                    if !(blinking || dying) { // Draw?
+                        let transparent = unsafe { *sprite.pixels }; // When we see the top left pixel, don't draw it.
                         for y in 0..sprite.h {
                             for x in 0..sprite.w {
-                                let pix_at = *at + IVec2::new(x as i32, y as i32);
-                                if (ivec2_within(display, pix_at)) {
-                                    // WARNING: u16 MATH COULD OVERFLOW
+                                let pix_at = *at + IVec2::new(x as i32, y as i32); // Current pixel within the coordinate system of the sprite.
+                                if (ivec2_within(display, pix_at)) { // Don't draw outside the screen!
+                                    // WARNING: u16 MATH COULD OVERFLOW WITH LARGE SPRITES
                                     let color = unsafe { *sprite.pixels.wrapping_add((y * sprite.w + if *reversed && sprite.flippable { sprite.w - x - 1 } else { x } ) as usize) };
                                     if (color != transparent) {
                                         screen[pix_at.y as usize * DISPLAY_WIDTH + pix_at.x as usize] = color;
@@ -460,54 +482,54 @@ fn main() -> ! {
                                 }
                             }
                         }
-                        dirty[screen_current] = Some(*at);
+                        dirty[screen_current] = Some(*at); // Set our dirty rectangle for the next time we hit this framebuffer.
                     } else {
-                        dirty[screen_current] = None;
+                        dirty[screen_current] = None; // Didn't draw, so don't set a dirty rectangle.
                     }
-                    if !(*stopped || dying) {
-                        let mut flip = false;
-                        if *reversed {
+                    if !(*stopped || dying) { // Mechanics this frame? (Slightly different logic from drawing.)
+                        let mut flip = false; // Did we hit an H-margin?
+                        if *reversed { // When reversed: Flow down and to the left
                             *at += IVec2::new(-1, if at.x%2==0 { 1 } else { 0 });
-                            if at.x <= 0 {
+                            if at.x <= 0 { // Went off left side
                                 flip = true;
                             }
-                        } else {
+                        } else { // When not reversed: Just go straight right
                             *at += IVec2::new(1, 0);
-                            if at.x + sprite.w as i32 >= DISPLAY_WIDTH as i32 {
+                            if at.x + sprite.w as i32 >= DISPLAY_WIDTH as i32 { // Off right side
                                 flip = true;
                             }
                         }
                         if (flip) {
                             *reversed = !*reversed;
                             audio_bleeping = AUDIO_BLEEP_LEN;
-                            if at.y + sprite.h as i32 >= DISPLAY_HEIGHT as i32 {
-                                *at = IVec2::new(0, at.y - DISPLAY_HEIGHT as i32);
-                                audio_pitch_mod = 2;
+                            if at.y + sprite.h as i32 >= DISPLAY_HEIGHT as i32 { // If went off bottom, reset to top
+                                *at = IVec2::new(0, at.y - DISPLAY_HEIGHT as i32); // Don't set EXACTLY to 0, so sprites phase nicely
+                                audio_pitch_mod = 2; // Low beep (for Y-wrap)
 
                                 // Uncomment this next line to test the speed test rectangle. Yes, this is silly
                                 // for _ in 1..1000000 { audio_pitch_mod *= 3 }
                             } else {
-                                audio_pitch_mod = 4;
+                                audio_pitch_mod = 4; // High beep (for X-wrap)
                             }
                         }
                     }
-                    if *live == Lifetime::Dying { *live = Lifetime::Dead }
-                    else if *live == Lifetime::Dead { any_delete = true }
+                    if *live == Lifetime::Dying { *live = Lifetime::Dead } // In first death state; move to second
+                    else if *live == Lifetime::Dead { any_delete = true } // In second death state; signal deletion
                 }
 
-                if any_delete {
+                if any_delete { // Scan over sprites list deleting anything with dead lifetime
                     let mut max = sprites.len();
                     let mut idx = 0;
                     while idx < max {
                         if sprites[idx].live == Lifetime::Dead {
-                            if select_idx > idx { select_idx -= 1 }
+                            if select_idx > idx { select_idx -= 1 } // Selection idx impacted by delete
                             max -= 1;
                             sprites.remove(idx);
                         } else {
                             idx += 1;
                         }
                     }
-                    select_idx = core::cmp::min(select_idx, sprites.len()-1);
+                    select_idx = core::cmp::min(select_idx, sprites.len()-1); // Selected index wound up off end of array
                 }
             }
 
@@ -543,7 +565,7 @@ fn main() -> ! {
             // Late mechanics
 
             // Controls: Pause // TODO move check earlier
-            if !game_dead && cont1_key_edge & FaceSelect as u16 != 0 {
+            if !game_over && cont1_key_edge & FaceSelect as u16 != 0 {
                 paused = !paused;
             }
 
