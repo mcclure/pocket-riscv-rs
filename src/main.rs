@@ -1,9 +1,9 @@
 #![no_std]
-#![no_main]
+#![cfg_attr(not(test), no_main)]
 #![allow(unused_parens)]
 
 use core::panic::PanicInfo;
-use core::slice::from_raw_parts_mut;
+//use core::slice::from_raw_parts_mut;
 
 extern crate alloc;
 
@@ -62,23 +62,6 @@ static HEAP: Heap = Heap::empty();
 const DISPLAY_WIDTH: usize = pac::constants::MAX_DISPLAY_WIDTH as usize;
 const DISPLAY_HEIGHT: usize = pac::constants::MAX_DISPLAY_HEIGHT as usize;
 
-const READ_LENGTH: usize = 0x10000;
-
-fn render_init(framebuffer_address: *mut u16) {
-    let framebuffer = unsafe { from_raw_parts_mut(framebuffer_address, DISPLAY_WIDTH * DISPLAY_HEIGHT) };
-
-    const PIXEL_MAX:usize = DISPLAY_WIDTH * DISPLAY_HEIGHT;
-    for idx in 0..PIXEL_MAX {
-        framebuffer[idx] = 0xFFFF;
-    }
-}
-
-fn pixel(framebuffer_address: *mut u16, x: usize, y: usize) -> &'static mut u16 {
-    let framebuffer = unsafe { from_raw_parts_mut(framebuffer_address as *mut u16, READ_LENGTH) };
-
-    &mut framebuffer[y * DISPLAY_WIDTH + x]
-}
-
 // Gamepad controls
 
 #[repr(u16)]
@@ -104,37 +87,38 @@ enum PocketControls {
 
 // This is the entry point for the application.
 // It is not allowed to return.
+#[cfg(not(test))]
 #[entry]
 fn main() -> ! {
+    use alloc::boxed::Box;
+
     let peripherals = unsafe { pac::Peripherals::steal() };
 
     // Initialize the allocator BEFORE you use it
     unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) };
 
-    println!("-- Minibreak --");
+    println!("-- Sprite test --");
 
     // Framebuffer pointer
     // Note we also had the option of simply picking an address and writing dma_base instead of reading it
-    let fb:*mut u16 = peripherals.VIDEO_FRAMEBUFFER.dma_base.read().bits() as *mut u16;
-
-    render_init(fb);
+    const DISPLAY_LEN:usize = DISPLAY_HEIGHT*DISPLAY_WIDTH;
+    let mut screens = [Box::new([0 as u16; DISPLAY_LEN]), Box::new([0 as u16; DISPLAY_LEN])];
+    let mut screen_current = 0; // First frame or two will be pretty nonsense
+    
+//    render_init(fb);
 
     // "APP"
     {
-        use alloc::vec::Vec;
-        use glam::IVec2;
-        use crate::irect2::*;
+//        use alloc::vec::Vec;
+//        use glam::IVec2;
+//        use crate::irect2::*;
 
         // Top-level config
-
-        const CONFIG_CHAOS:u32 = 0; // 0-2 inclusive, set above 0 for funny pixel garbage effect
-        const CONFIG_IMMORTAL:bool = false; // Set true to test without death
 
         // Basic state
 
         let mut paused = false;
-        let mut dead = false;
-        let mut won = false;
+        let dead = false;
         let mut cont1_key_last = 0; // State of controller on previous loop
         // let mut first_frame = true;
 
@@ -150,119 +134,18 @@ fn main() -> ! {
             }
         }
 
-        let screen = IRect2::new(IVec2::ZERO, IVec2::new(DISPLAY_WIDTH as i32, DISPLAY_HEIGHT as i32));
+//        let screen = IRect2::new(IVec2::ZERO, IVec2::new(DISPLAY_WIDTH as i32, DISPLAY_HEIGHT as i32));
 
         // Audio properties
 
         const AUDIO_TARGET:i32 = 48000/60 + 200; // Try to always fill audio buffer to this point
 
-        // On audio: There will be three types of sound:
-        // 1. Low pitched hum, volume modified by an LFO. This can be overriden by
-        // 2. A "sound effect" bleep, either high or low, used for wall/object bounces. Overriden by
-        // 3. A pulsating "bloop", used to indicate death or victory
-
-        const AUDIO_LFO_MAX:u16 = 48000; // Speed (period) of background humming envelope
-        const AUDIO_FREQ_DELTA:u16 = 150; // Step of basic sawtooth wave; increase to increase pitch of bleeps/bloops
-        const AUDIO_REFLECT_BLEEP:u16 = 800*2; // How long (in samples) does a single bleep last?
-
-        const AUDIO_DEATH_BLOOP_STROBE:u16 = 8*800; // How long is a single bloop pulsate?
-        const AUDIO_DEATH_BLOOP:u16 = AUDIO_DEATH_BLOOP_STROBE*6; // How long is the entire bloop sound effect?
-
         // Audio state
 
-        let mut audio_wave:u16 = 0; // Sawtooth wave state used for all sounds
-        let mut audio_lfo:u16 = AUDIO_LFO_MAX/4; // "Low frequency oscillator"
-        let mut audio_bleep_high = false; // If true and audio_bleeping, use high frequency
-        let mut audio_bleeping = 0; // Remaining samples to play bleep
-        let mut audio_blooping = 0; // Remaining cycles to play bloop
 
         // Game properties
 
-        // This is a simple brick break game. There are players (paddles), balls, and vaders (blocks).
-        // When balls hit vaders, they are destroyed. When it hits the paddle it bounces left or right,
-        // depending on which side of the paddle it hit. The final vader starts trying to run away.
-
-        // On graphics: All drawing is done via XOR. This is nice and simple (drawing is the same as erasing)
-        // and generalizes nicely to sprites. When an object needs to move, it draws itself once at its
-        // previous position (to erase) then again after updating its position.
-        // Note because our background is white, all color constants are inverted below.
-
-        const PLAYER_SIZE:IVec2 = IVec2::new(40, 8);
-        const PLAYER_START:IVec2 = IVec2::new(DISPLAY_WIDTH as i32/2, DISPLAY_HEIGHT as i32-20-PLAYER_SIZE.y/2);
-        const PLAYER_COLOR:u16 = 0b11111_101010_11111; // Remember colors are RGB 565
-        const PLAYER_SPEED:i32 = 2; // Velocity when button down
-
-        const BALL_SIZE:IVec2 = IVec2::new(4,4);
-        let ball1_start:IVec2 = PLAYER_START + IVec2::new(0, -30); // Initial position
-        const BALL_COLOR:u16 = 0b00000_000000_11111 ^ 0xFFFF;
-        const BALL_SPEED:i32 = 3; // Movement per frame. Notice this is faster than the player.
-        const BALL_FACING_START:IVec2 = IVec2::new(1,-1); // Initial velocity
-
-        // Multiply by one of these vectors to reflect on the X or Y axis.
-        const REFLECTS:[IVec2;2] = [ IVec2::new(-1,1), IVec2::new(1,-1) ];
-
-        const VADER_COLS:i32 = 8; // Vaders appear in cols X rows grid
-        const VADER_ROWS:i32 = 4;
-        const VADER_SIZE:IVec2 = IVec2::new(20, 12);
-        const VADER_PADDING:IVec2 = IVec2::new(10,20); // Space between vaders
-        // Upper left pixel position of upper left vader
-        const VADER_ORIGIN:IVec2 = IVec2::new((DISPLAY_WIDTH as i32-(VADER_COLS*VADER_SIZE.x + (VADER_COLS-1)*VADER_PADDING.x))/2, 20);
-        const VADER_COLOR:u16 = 0b11111_000000_00000 ^ 0xFFFF;
-
-        assert_eq!(VADER_ORIGIN.x+VADER_PADDING.x >= 0, true, "Screen too narrow for vaders");
-
         // Game state
-
-        struct Vader { // Block
-            rect:IRect2
-        }
-
-        struct Ball {
-            rect:IRect2,
-            facing:IVec2 // Each axis should be 1 or -1
-        }
-
-        struct Player {
-            rect:IRect2,
-            facing:i32 // -1 or 1 l/r, or 0 when still
-        }
-
-        let mut vaders: Vec<Vader> = Default::default();
-        let mut balls: Vec<Ball> = Default::default();
-        let mut players: Vec<Player> = Default::default();
-
-        players.push(Player { rect:IRect2::new_centered(PLAYER_START, PLAYER_SIZE), facing:0 });
-
-        let ball_facing_start = { // Randomly start off moving left or right; use the current UTC as a very weak RNG
-            let mut ball_facing = BALL_FACING_START;
-            if 0 == peripherals.APF_RTC.unix_seconds.read().bits() % 2 { ball_facing.x *= -1 }
-            ball_facing
-        };
-        balls.push(Ball { rect:IRect2::new_centered(ball1_start, BALL_SIZE), facing:ball_facing_start });
-
-        let mut final_vader_facing = 0; // Becomes nonzero when 1 vader left
-
-        for y in 0..VADER_ROWS {
-            for x in 0..VADER_COLS {
-                let ul = VADER_ORIGIN + IVec2::new(x, y)*(VADER_SIZE + VADER_PADDING);
-                vaders.push(Vader { rect:IRect2::new(ul, ul+VADER_SIZE) });
-            }
-        }
-
-        // Gfx support
-
-        fn fill(fb: *mut u16, rect:IRect2, color:u16) { // XOR rectangle with given color
-            for y in rect.ul.y..rect.br.y {
-                for x in rect.ul.x..rect.br.x {
-                    *pixel(fb, x as usize,y as usize) ^= color;
-                }
-            }
-        }
-
-        // Initial draw
-        for player in &players { fill(fb, player.rect, PLAYER_COLOR); }
-        for ball in &balls { fill(fb, ball.rect, BALL_COLOR); }
-        for vader in &vaders { fill(fb, vader.rect, VADER_COLOR); }
 
         loop {
             // Busy loop until VBLANK begins, signaling next frame ready to go.
@@ -301,6 +184,25 @@ fn main() -> ! {
                 if frame_ready { break; }
             }
 
+            // Swap read/write buffer
+
+            unsafe { // This will be u64, not u32, on a LP64 system
+                peripherals.VIDEO_FRAMEBUFFER.dma_base.write(|w| w.bits( screens[screen_current].as_ptr() as u32 ));
+            }
+            screen_current = (screen_current + 1)%2;
+
+            #[cfg(feature = "speed-debug")]
+            {
+                let video = peripherals.APF_VIDEO.video.read();
+                if !video.vblank_status().bit() { // Status has already gone low
+                    if 0== missed_deadline_count % SPEED_DEBUG_RATE {
+                        println!("Too slow! Drawing finished outside vblank deadline (fail #{})", missed_deadline_count);
+                    }
+                    missed_deadline_already = true;
+                }
+                frame_already_overdue = video.vblank_triggered().bit();
+            }
+
             // Controls
 
             let cont1_key = peripherals.APF_INPUT.cont1_key.read().bits() as u16; // Bitmask (crop out analog sticks)
@@ -321,153 +223,14 @@ fn main() -> ! {
 
             // Mechanics
 
-            if !paused && !dead && !won { // In these cases, freeze screen and loop to handle audio
-                // Vader mechanics
-                // (When one block is left, have it start moving so you aren't stuck unable to hit it.)
-                if vaders.len() == 1 {
-                    let vader = &mut vaders[0];
-                    fill(fb, vader.rect, VADER_COLOR); // Erase
+            // Draw next frame
 
-                    if final_vader_facing == 0 { // This is our first frame with only 1 vader
-                        // For an initial direction, move toward the screen center
-                        final_vader_facing = if vader.rect.center().x > DISPLAY_WIDTH as i32/2
-                            { -1 } else { 1 }
-                    }
+            let screen = &mut* screens[screen_current];
 
-                    // Move vader per facing
-                    let vader_move = IVec2::new(final_vader_facing, 0);
-                    let rect = vader.rect.offset(vader_move);
-
-                    // Bounce at screen edge
-                    vader.rect = if screen.enclose(rect) { rect } else {
-                        final_vader_facing = -final_vader_facing;
-                        vader.rect.offset(-vader_move)
-                    };
-
-                    fill(fb, vader.rect, VADER_COLOR); // Draw
+            for y in 0..DISPLAY_HEIGHT {
+                for x in 0..DISPLAY_WIDTH {
+                    screen[y * DISPLAY_WIDTH + x] = if (screen_current == 0) { 0 } else { 0xFFFF };
                 }
-
-                // Player mechanics
-                for player in &mut players { // 2 player mode left as exercise to reader
-                    // Controls: Movement
-                    // Here we go to quite some trouble to handle the case of left and right held down at once--
-                    // Which is impossible on the Analogue builtin buttons. But maybe it could happen on bluetooth
-                    const LR_MASK:u16 = DpadLeft as u16 | DpadRight as u16;
-                    player.facing = if cont1_key & LR_MASK == LR_MASK { // L+R both down case:
-                        if cont1_key_edge & DpadLeft as u16 != 0 { -1 }
-                        else if cont1_key_edge & DpadRight as u16 != 0 { 1 }
-                        else { player.facing }
-                    } else { // Only one of L+R down case:
-                        if cont1_key & DpadLeft as u16 != 0 { -1 }
-                        else if cont1_key & DpadRight as u16 != 0 { 1 }
-                        else { 0 }
-                    };
-
-                    if player.facing != 0 { // If moving
-                        if CONFIG_CHAOS < 2 {
-                            fill(fb, player.rect, PLAYER_COLOR); // Erase
-                        }
-
-                        // Update based on facing, then force back inside screen.
-                        player.rect = player.rect.offset(IVec2::new(player.facing*PLAYER_SPEED, 0))
-                            .force_enclose_x(screen);
-
-                        fill(fb, player.rect, PLAYER_COLOR); // Draw
-                    }
-                }
-
-                // Ball
-                for ball in &mut balls {
-                    if CONFIG_CHAOS < 1 {
-                        fill(fb, ball.rect, BALL_COLOR); // Erase
-                    }
-
-                    // Step one pixel at a time, one axis at a time.
-                    'step: for _ in 0..BALL_SPEED {
-                        for (aid, axis) in IVec2::AXES.into_iter().enumerate() {
-                            let v = axis*ball.facing; // Velocity on this axis
-
-                            //println!("TEST!! {}: {:?} = {:?} * {:?}", step, (aid,axis), ball.facing, v);
-
-                            let rect = ball.rect.offset(v); // Candidate rectangle, if we move 1 pixel on that axis.
-                            let mut reflect = false; // Code below will test for a collision, and set "reflect" to reject the new position.
-
-                            if !screen.enclose(rect) { // Test collision with edge of screen
-                                if v.y<=0 || CONFIG_IMMORTAL {
-                                    reflect = true;
-                                    audio_bleep_high = false;
-                                } else {
-                                    // Touched bottom of screen. Game over.
-                                    dead = true;
-                                    audio_blooping = AUDIO_DEATH_BLOOP;
-                                    break 'step;
-                                }
-                            }
-
-                            for player in &players {
-                                if reflect { break; } // Already rejected
-
-                                // Test collision with player paddle
-                                if player.rect.intersect(rect) {
-                                    reflect = true;
-                                    audio_bleep_high = false;
-
-                                    // "Steer" based on where on the paddle you hit
-                                    if v.y>0 {
-                                        ball.facing.x = if ball.rect.center().x > player.rect.center().x
-                                            { 1 } else { -1 }
-                                    }
-                                }
-                            }
-
-                            let mut destroy:Option<usize> = None; // Select a vader to destroy
-                            for (idx,vader) in vaders.iter().enumerate() {
-                                if reflect { break; } // Already rejected
-
-                                if vader.rect.intersect(rect) {
-                                    reflect = true;
-                                    destroy = Some(idx);
-                                    audio_bleep_high = true; // Only vaders bleep high
-                                    fill(fb, vader.rect, VADER_COLOR); // Erase vader (screen)
-                                }
-                            }
-
-                            // Did we select a vader to destroy?
-                            // (We have to do this afterward so we don't mutate the vec while iterating it.)
-                            if let Some(idx) = destroy {
-                                vaders.remove(idx); // Erase vader (object)
-                                if vaders.len() == 0 { // Oh, that was the last vader
-                                    won = true;
-                                    audio_blooping = AUDIO_DEATH_BLOOP;
-                                    break 'step; // Don't bother drawing new ball position
-                                }
-                            }
-
-                            // Set ball position from candidate
-                            ball.rect = if !reflect {
-                                rect
-                            } else { // Candidate was rejected; set a rectangle in the opposite direction.
-                                ball.facing *= REFLECTS[aid];
-                                audio_bleeping = AUDIO_REFLECT_BLEEP;
-                                ball.rect.offset(-v)
-                            };
-                        }
-                    }
-
-                    fill(fb, ball.rect, BALL_COLOR); // Draw
-                }
-            }
-
-            #[cfg(feature = "speed-debug")]
-            {
-                let video = peripherals.APF_VIDEO.video.read();
-                if !video.vblank_status().bit() { // Status has already gone low
-                    if 0== missed_deadline_count % SPEED_DEBUG_RATE {
-                        println!("Too slow! Drawing finished outside vblank deadline (fail #{})", missed_deadline_count);
-                    }
-                    missed_deadline_already = true;
-                }
-                frame_already_overdue = video.vblank_triggered().bit();
             }
 
             // Audio generation
@@ -475,46 +238,12 @@ fn main() -> ! {
             // Generate enough samples to fill us up to our desired buffer (a frame plus a safety margin)
             let audio_needed = AUDIO_TARGET - peripherals.APF_AUDIO.buffer_fill.read().bits() as i32;
             for _ in 0..audio_needed {
-                let mut lfo_engaged = false; // True if the background "low pitched hum" is playing
-
-                if (!paused) { // When we pause we still output audio, held at the last PCM value.
-                    // Remember (see "On audio" above), we have one saw wave generator and an LFO.
-                    // freq_delta will determine the frequency of the saw generator this sample
-                    let freq_delta = if audio_blooping>0 { // Case 3, strobing bloop
-                        audio_blooping -= 1;
-
-                        // No matter what, the game ends when the bloop is done
-                        if audio_blooping == 0 { paused = true; }
-
-                        // The bloop silences itself 1/2 the time, on the STROBE boundary
-                        if 0!=(audio_blooping/AUDIO_DEATH_BLOOP_STROBE)%2 {
-                            // Run at base - 1 octave when losing, or base + 2 octaves when winning
-                            if !won { AUDIO_FREQ_DELTA/2 } else { AUDIO_FREQ_DELTA*4 }
-                        } else { 0 }
-                    } else if audio_bleeping>0 { // Case 2, single bleep
-                        audio_bleeping -= 1;
-
-                        // Run at base + 2 octaves for a vader, or base + 1 octave otherwise
-                        if audio_bleep_high { AUDIO_FREQ_DELTA*4 } else { AUDIO_FREQ_DELTA*2 }
-                    } else { // Case 1, pulsating hum at exactly base frequency
-                        lfo_engaged = true;
-                        AUDIO_FREQ_DELTA
-                    };
-
-                    // Simplest waveform possible: Increment last sample's value by the delta, then wrap around at 2^16
-                    audio_wave = audio_wave.wrapping_add(freq_delta);
-
-                    // LFO state only increments when not paused
-                    audio_lfo = (audio_lfo+1)%AUDIO_LFO_MAX;
-                }
+                let audio_wave:u32 = 0;
 
                 let mut value:u32 = audio_wave as u32;
 
                 // Max volume is 2^12-1
                 value = value >> 4;
-
-                // Apply LFO envelope
-                if lfo_engaged { value *= audio_lfo as u32; value /= AUDIO_LFO_MAX as u32; }
 
                 // Output value is two stereo i16s packed into one u32
                 // Notice we did our math above in u32; it doesn't matter because bit 15 is always 0

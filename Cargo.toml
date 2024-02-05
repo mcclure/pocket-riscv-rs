@@ -1,5 +1,5 @@
 [package]
-name = "minibreak"
+name = "spritetest"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,6 +10,7 @@ speed-debug = []
 
 [build-dependencies]
 litex-pac = { path = "external/openfpga-litex/lang/rust/crates/litex-pac", features = ["rt"] }
+# slint-build = "1.2.2"
 
 [dependencies]
 embedded-alloc = "0.5.0"
@@ -24,5 +25,3 @@ num-traits = { version = "0.2.17", default-features = false }
 glam = { version = "0.24.2", default-features = false, features = ["libm", "fast-math"] }
 cfg-if = "1.0.0"
 
-[build-dependencies]
-# slint-build = "1.2.2"
