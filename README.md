@@ -1,5 +1,15 @@
 This is a test app to demonstrate sprite drawing in the openfpga-litex (Pocket RISC-V) core. All drawing is done in CPU.
 
+It will draw 2 sprites to begin with. You can select a sprite using LEFT and RIGHT d-pad and change its image with UP and DOWN d-pad. To add additional sprites, press RIGHT many times. To check the currently selected sprite, press L. To halt the selected sprite's automatic movement, press X. To move the selected sprite manually, hold L and use the d-pad. To reset the selected sprite to upper left, press A. To delete the selected sprite, press B.
+
+This example uses some mildly fancy features to get performance:
+
+- PNGs are decoded in build.rs and embedded into the executable.
+- Drawing is double-buffered.
+- Only rectangles which have changed are updated frame to frame.
+
+In my testing, I can get about 13 sprites before I start missing frame deadlines (as measured by speed-debug, see [run.txt](run.txt)). I think I can bump that up around 2x with some optimizations.
+
 # Usage
 
 See [run.txt](run.txt)

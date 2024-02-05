@@ -40,9 +40,9 @@ cargo +nightly doc --open
 
 (export PROJECT=`pwd`; export PYTHONPATH="."; (cd litex && source .venv/bin/activate && python3 litex/tools/litex_term.py --jtag-config=openocd_usb_blaster.cfg jtag))
 
-### Run with speed debug printlns
+### Run with speed debug visualization / printlns
 
-make RUST_ARGS="--features speed-debug"
+make RUST_ARGS="--features speed-debug --features speed-debug-serial"
 
 ### On Windows?:
 ### These will probably work in lieu of the makefile:
